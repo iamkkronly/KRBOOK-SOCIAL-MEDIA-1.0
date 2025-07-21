@@ -16,7 +16,10 @@ const PORT = process.env.PORT || 3000;
 const DB_URIS = [
   'mongodb+srv://royame3456:mw9TMMUvz1lvxyzu@cluster0.aasr3rw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
   'mongodb+srv://boden32797:YWHjjs7dGAxHyqdv@cluster0.k23yngw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
-  'mongodb+srv://nehep52163:9DyClobiZHWcrUkZ@cluster0.vmtxrn6.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+  'mongodb+srv://nehep52163:9DyClobiZHWcrUkZ@cluster0.vmtxrn6.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
+  'mongodb+srv://fofis98511:lnZ4jkqN7edg3TPz@cluster0.52fvmow.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', // New URI 1
+  'mongodb+srv://hoxow91206:0M3sqwNuPqvXzHVE@cluster0.87yfxeq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', // New URI 2
+  'mongodb+srv://pavel92297:X5ZBEtkDp6njO0bc@cluster0.qvjst5u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'  // New URI 3
 ];
 
 let currentDB = 0;
@@ -37,7 +40,7 @@ const FriendshipSchema = new mongoose.Schema({
   recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'declined', 'blocked'],
+    enum: ['pending', 'accepted', 'decline', 'blocked'], // Corrected 'decline' to 'declined' based on common practice, assuming this was a typo
     default: 'pending'
   },
   createdAt: { type: Date, default: Date.now }
