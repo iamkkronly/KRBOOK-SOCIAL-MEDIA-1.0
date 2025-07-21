@@ -158,7 +158,7 @@
         <h3>Menu</h3>
         <div class="tab-buttons">
           <button id="postsTabBtn" class="active" onclick="showTab('postsTab', 'postsTabBtn')">Posts</button>
-          <button id="profileTabBtn" onclick="showTab('profileTab', 'profileTabBtn', true)">My Profile</button>
+          <button id="profileTabBtn" onclick="showMyProfile()">My Profile</button>
           <button id="friendsTabBtn" onclick="showTab('friendsTab', 'friendsTabBtn')">Friends</button>
           <button id="chatTabBtn" onclick="showTab('chatTab', 'chatTabBtn')">Chat</button>
         </div>
@@ -387,9 +387,9 @@
         skip = 0; // Reset skip for main feed
         document.getElementById('posts').innerHTML = '';
         loadPosts();
-        // If the current profile view is "My Profile", reload its posts
+        // If currently viewing my own profile, refresh its posts
         if (currentProfileUser && currentProfileUser.username === loggedInUser) {
-            loadMyProfile();
+            openProfile(loggedInUser);
         }
       } else {
         alert('Failed to create post. Are you logged in?');
@@ -427,7 +427,7 @@
         document.getElementById('posts').innerHTML = '';
         loadPosts();
         if (currentProfileUser && currentProfileUser.username === loggedInUser) {
-            loadMyProfile(); // Reload my profile posts too
+            openProfile(loggedInUser); // Reload my profile posts if currently viewing it
         }
       } else {
         alert('Failed to delete post.');
@@ -689,23 +689,31 @@
 
     // --- Profile Section Functions ---
 
-    // Loads the currently logged-in user's profile
-    async function loadMyProfile() {
-        if (!loggedInUser) return;
-        document.getElementById('backToMyProfileBtn').style.display = 'none';
+    // Navigates to and loads the currently logged-in user's profile
+    async function showMyProfile() {
+        if (!loggedInUser) {
+            alert('Please log in to view your profile.');
+            return;
+        }
+        showTab('profileTab', 'profileTabBtn'); // Switch to the profile tab
+        document.getElementById('backToMyProfileBtn').style.display = 'none'; // Hide back button for own profile
         document.getElementById('myProfileEditControls').style.display = 'flex'; // Show edit controls for own profile
-        openProfile(loggedInUser); // Call openProfile with logged-in username
+        openProfile(loggedInUser); // Load logged-in user's profile
     }
 
-    // Opens a specific user's profile
+    // Opens a specific user's profile (could be self or another user)
     async function openProfile(usernameToView) {
-        // ALWAYS switch to the profile tab first
-        showTab('profileTab', 'profileTabBtn');
+        showTab('profileTab', 'profileTabBtn'); // Always switch to the profile tab
+
+        currentProfileUser = null; // Clear previously loaded profile data
 
         // Determine if viewing own profile or another's
         const isMyOwnProfile = (usernameToView === loggedInUser);
+
+        // Control visibility of edit controls and back button
         document.getElementById('myProfileEditControls').style.display = isMyOwnProfile ? 'flex' : 'none';
         document.getElementById('backToMyProfileBtn').style.display = isMyOwnProfile ? 'none' : 'block';
+
 
         document.getElementById('profileUsernameDisplay').textContent = 'Loading profile...';
         document.getElementById('profilePictureDisplay').src = '/images/default-profile.png'; // Set a temporary default
@@ -724,7 +732,7 @@
 
         document.getElementById('profileUsernameDisplay').textContent = data.user.username;
         document.getElementById('profilePictureDisplay').src = data.user.profilePicture || '/images/default-profile.png';
-        document.getElementById('newUsernameInput').value = data.user.username; // Pre-fill for editing
+        document.getElementById('newUsernameInput').value = data.user.username; // Pre-fill for editing (only visible for own profile)
 
         // Display posts for the profile being viewed
         document.getElementById('profilePosts').innerHTML = ''; // Clear previous posts
