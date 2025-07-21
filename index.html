@@ -9,6 +9,8 @@
     body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f2f5; display: flex; flex-direction: column; min-height: 100vh; }
     header { background: #4267b2; color: white; padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
     header h2 { margin: 0; }
+    .header-user-info { display: flex; align-items: center; }
+    .header-profile-pic { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; margin-right: 10px; border: 1px solid white; }
     .logout-btn { background: #f44336; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; }
     main { padding: 1rem; display: flex; flex-grow: 1; }
     .sidebar { width: 250px; background: white; padding: 1rem; border-radius: 8px; margin-right: 1rem; flex-shrink: 0; }
@@ -32,8 +34,8 @@
     /* Chat specific styles */
     .chat-container { display: flex; flex-direction: column; height: calc(100vh - 120px); background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
     .chat-messages { flex-grow: 1; overflow-y: auto; padding: 1rem; border-bottom: 1px solid #eee; display: flex; flex-direction: column; }
-    .message-input-area { padding: 1rem; display: flex; border-top: 1px solid #eee; }
-    .message-input-area input { flex-grow: 1; margin-right: 10px; }
+    .message-input-area { padding: 1rem; display: flex; border-top: 1px solid #eee; flex-wrap: wrap; /* Allow wrapping for reply-quote */ }
+    .message-input-area #messageInput { flex-grow: 1; margin-right: 10px; }
     .message { margin-bottom: 8px; padding: 8px 12px; border-radius: 18px; max-width: 70%; position: relative; }
     .message.sent { background: #0084ff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
     .message.received { background: #e4e6eb; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; }
@@ -54,6 +56,19 @@
       font-size: 0.85em;
       color: #555;
       border-radius: 3px;
+      width: 100%; /* Take full width */
+      box-sizing: border-box;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .reply-quote button {
+        margin: 0;
+        padding: 2px 5px;
+        font-size: 0.8em;
+        background: none;
+        color: #dc3545;
+        border: 1px solid #dc3545;
     }
     .message .reply-btn {
       font-size: 0.75em;
@@ -61,18 +76,74 @@
       cursor: pointer;
       margin-top: 5px;
       display: inline-block;
+      margin-left: 10px;
     }
     .message .reply-btn:hover {
       text-decoration: underline;
     }
 
+    /* Profile Section Specific Styles */
+    #profileTab {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    #profileDetails {
+        text-align: center;
+        margin-bottom: 1.5rem;
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        width: 100%;
+        max-width: 400px;
+        box-sizing: border-box;
+    }
+    #profilePictureDisplay {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        object-fit: cover;
+        margin-bottom: 1rem;
+        border: 2px solid #ddd;
+    }
+    #profileUsernameDisplay {
+        font-size: 1.8em;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+    }
+    #profilePosts {
+        width: 100%;
+        margin-top: 1rem;
+    }
+    .profile-edit-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 1rem;
+    }
+    .profile-edit-controls input[type="file"],
+    .profile-edit-controls input[type="text"] {
+        margin: 0; /* Override general input margin */
+    }
+    .clickable-username {
+        cursor: pointer;
+        font-weight: bold;
+        color: #4267b2;
+    }
+    .clickable-username:hover {
+        text-decoration: underline;
+    }
   </style>
 </head>
 <body>
   <header>
     <h2>KRBOOK</h2>
-    <span id="loggedInUsername"></span>
-    <button id="logoutBtn" class="logout-btn" style="display: none;" onclick="logout()">Logout</button>
+    <div class="header-user-info">
+      <img id="headerProfilePic" class="header-profile-pic" src="/images/default-profile.png" alt="Profile Picture" />
+      <span id="loggedInUsername"></span>
+      <button id="logoutBtn" class="logout-btn" style="display: none;" onclick="logout()">Logout</button>
+    </div>
   </header>
   <main>
     <section id="auth" class="auth">
@@ -87,6 +158,7 @@
         <h3>Menu</h3>
         <div class="tab-buttons">
           <button id="postsTabBtn" class="active" onclick="showTab('postsTab', 'postsTabBtn')">Posts</button>
+          <button id="profileTabBtn" onclick="showTab('profileTab', 'profileTabBtn', true)">My Profile</button>
           <button id="friendsTabBtn" onclick="showTab('friendsTab', 'friendsTabBtn')">Friends</button>
           <button id="chatTabBtn" onclick="showTab('chatTab', 'chatTabBtn')">Chat</button>
         </div>
@@ -115,6 +187,23 @@
           <hr />
           <div id="posts"></div>
           <button onclick="loadMore()">Load More</button>
+        </section>
+
+        <section id="profileTab" class="tab-content container">
+            <button id="backToMyProfileBtn" style="display:none; margin-bottom: 1rem;" onclick="showMyProfile()">Back to My Profile</button>
+            <div id="profileDetails">
+                <img id="profilePictureDisplay" src="/images/default-profile.png" alt="Profile Picture" />
+                <div id="profileUsernameDisplay">Loading...</div>
+
+                <div id="myProfileEditControls" class="profile-edit-controls" style="display:none;">
+                    <input type="file" id="profilePicInput" accept="image/*" />
+                    <input type="text" id="newUsernameInput" placeholder="New Username" />
+                    <button onclick="updateProfile()">Update Profile</button>
+                </div>
+            </div>
+            <hr />
+            <h3>Posts by <span id="profilePostsUsername"></span></h3>
+            <div id="profilePosts"></div>
         </section>
 
         <section id="friendsTab" class="tab-content container">
@@ -150,15 +239,17 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
-    let skip = 0;
+    let skip = 0; // For main feed posts
     let loggedInUser = null;
     let loggedInUserId = null;
+    let loggedInProfilePicture = '/images/default-profile.png';
     let socket = null;
     let currentConversationId = null;
     let currentChatParticipantName = null;
     let conversationMessagesLoaded = new Set(); // To prevent duplicate message loading
 
     let replyingTo = null; // Stores message data being replied to: { _id, senderUsername, text }
+    let currentProfileUser = null; // Stores the user object whose profile is currently being viewed
 
     async function login() {
       const username = document.getElementById('username').value;
@@ -171,11 +262,12 @@
       const result = await res.json();
       if (result.success) {
         loggedInUser = result.username;
-        // Re-fetch session to get userId after login if it wasn't returned in login response
-        await fetchSession();
+        loggedInUserId = result.userId;
+        loggedInProfilePicture = result.profilePicture || '/images/default-profile.png'; // Use default if not set
+
         document.getElementById('auth').style.display = 'none';
         document.getElementById('appContent').style.display = 'flex';
-        document.getElementById('loggedInUsername').textContent = `Logged in as: ${loggedInUser}`;
+        updateHeaderUserInfo();
         document.getElementById('logoutBtn').style.display = 'block';
         initializeSocketIo();
         loadPosts();
@@ -194,13 +286,14 @@
       if (result.success) {
         loggedInUser = null;
         loggedInUserId = null;
+        loggedInProfilePicture = '/images/default-profile.png';
         if (socket) {
           socket.disconnect();
           socket = null;
         }
         document.getElementById('auth').style.display = 'flex';
         document.getElementById('appContent').style.display = 'none';
-        document.getElementById('loggedInUsername').textContent = '';
+        updateHeaderUserInfo();
         document.getElementById('logoutBtn').style.display = 'none';
         // Clear all dynamic content
         document.getElementById('posts').innerHTML = '';
@@ -208,6 +301,8 @@
         document.getElementById('friendsList').innerHTML = '';
         document.getElementById('userSearchResults').innerHTML = '';
         document.getElementById('conversationsList').innerHTML = '';
+        document.getElementById('profilePosts').innerHTML = ''; // Clear profile posts
+        currentProfileUser = null;
         closeChat(); // Close any active chat
       } else {
         alert('Failed to log out.');
@@ -220,9 +315,11 @@
       if (data.username && data.userId) {
         loggedInUser = data.username;
         loggedInUserId = data.userId;
+        loggedInProfilePicture = data.profilePicture || '/images/default-profile.png';
+
         document.getElementById('auth').style.display = 'none';
         document.getElementById('appContent').style.display = 'flex';
-        document.getElementById('loggedInUsername').textContent = `Logged in as: ${loggedInUser}`;
+        updateHeaderUserInfo();
         document.getElementById('logoutBtn').style.display = 'block';
         initializeSocketIo();
         loadPosts();
@@ -234,6 +331,11 @@
         document.getElementById('auth').style.display = 'flex';
         document.getElementById('appContent').style.display = 'none';
       }
+    }
+
+    function updateHeaderUserInfo() {
+        document.getElementById('loggedInUsername').textContent = `Logged in as: ${loggedInUser}`;
+        document.getElementById('headerProfilePic').src = loggedInProfilePicture;
     }
 
     // --- Socket.IO Initialization ---
@@ -282,9 +384,10 @@
       });
       if (res.ok) {
         e.target.reset();
-        skip = 0;
+        skip = 0; // Reset skip for main feed
         document.getElementById('posts').innerHTML = '';
         loadPosts();
+        loadMyProfile(); // Reload profile posts too
       } else {
         alert('Failed to create post. Are you logged in?');
       }
@@ -297,7 +400,10 @@
         const el = document.createElement('div');
         el.className = 'post';
         el.innerHTML = `
-          <div><b>${post.username}</b> ${post.username === loggedInUser ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}</div>
+          <div>
+            <b class="clickable-username" onclick="openProfile('${post.username}')">${post.username}</b>
+            ${post.username === loggedInUser ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}
+          </div>
           <div>${post.text}</div>
           ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
         `;
@@ -314,16 +420,19 @@
       if (!confirm('Delete this post?')) return;
       const res = await fetch(`/post/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        skip = 0;
+        skip = 0; // Reset skip for main feed
         document.getElementById('posts').innerHTML = '';
         loadPosts();
+        if (currentProfileUser && currentProfileUser.username === loggedInUser) {
+            loadUserPosts(loggedInUser); // Reload my profile posts if currently viewing it
+        }
       } else {
         alert('Failed to delete post.');
       }
     }
 
     // --- Tab Management ---
-    function showTab(tabId, buttonId) {
+    function showTab(tabId, buttonId, isMyProfile = false) {
       document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
       document.querySelectorAll('.tab-buttons button').forEach(btn => btn.classList.remove('active'));
 
@@ -337,6 +446,14 @@
       } else {
         document.getElementById('friendsSidebarContent').style.display = 'block';
         document.getElementById('chatSidebarContent').style.display = 'none';
+      }
+
+      // Handle profile tab specific logic
+      if (tabId === 'profileTab') {
+          if (isMyProfile) {
+              openProfile(loggedInUser); // Open logged-in user's profile
+              document.getElementById('backToMyProfileBtn').style.display = 'none';
+          }
       }
     }
 
@@ -516,18 +633,12 @@
       const messageDiv = document.createElement('div');
       messageDiv.className = 'message ' + (String(message.sender._id) === String(loggedInUserId) ? 'sent' : 'received');
 
-      let replyQuoteHtml = '';
-      // If the message object itself contains a 'replyTo' field (e.g., replyTo: {senderUsername: '...', text: '...'}),
-      // you could render it here. For this current implementation, we're just quoting on the frontend.
-      // If you implement backend reply linking, 'message.replyTo' would be populated.
-      // For now, assume message has sender.username and text for local quoting.
-
       messageDiv.innerHTML = `
         <strong>${message.sender.username}</strong>
         <span>${message.text}</span>
         <div class="message-time">
           ${new Date(message.createdAt).toLocaleTimeString()}
-          <span class="reply-btn" onclick="prepareReply('${message._id}', '${message.sender.username}', \`${message.text}\`)">Reply</span>
+          <span class="reply-btn" onclick="prepareReply('${message._id}', '${message.sender.username}', \`${message.text.replace(/`/g, '\\`')}\`)">Reply</span>
         </div>
       `;
       chatMessagesDiv.appendChild(messageDiv);
@@ -541,7 +652,7 @@
         text: messageText
       };
       document.getElementById('replyingToText').textContent = `${senderUsername}: "${messageText.substring(0, 30)}${messageText.length > 30 ? '...' : ''}"`;
-      document.getElementById('replyingToMessage').style.display = 'block';
+      document.getElementById('replyingToMessage').style.display = 'flex'; // Use flex for reply-quote
       document.getElementById('messageInput').focus();
     }
 
@@ -566,8 +677,6 @@
           conversationId: currentConversationId,
           text: text,
           senderId: loggedInUserId
-          // You could also pass replyingTo._id here if you want to link replies in the backend
-          // repliedToMessageId: replyingTo ? replyingTo._id : null
         });
         messageInput.value = ''; // Clear input
       }
@@ -583,6 +692,99 @@
       cancelReply(); // Clear any pending reply when chat is closed
     }
 
+    // --- Profile Section Functions ---
+
+    // Loads the currently logged-in user's profile
+    async function loadMyProfile() {
+        if (!loggedInUser) return;
+        document.getElementById('backToMyProfileBtn').style.display = 'none';
+        document.getElementById('myProfileEditControls').style.display = 'flex'; // Show edit controls for own profile
+        openProfile(loggedInUser); // Call openProfile with logged-in username
+    }
+
+    // Opens a specific user's profile
+    async function openProfile(usernameToView) {
+        showTab('profileTab', 'profileTabBtn'); // Switch to the profile tab
+
+        // Determine if viewing own profile or another's
+        const isMyOwnProfile = (usernameToView === loggedInUser);
+        document.getElementById('myProfileEditControls').style.display = isMyOwnProfile ? 'flex' : 'none';
+        document.getElementById('backToMyProfileBtn').style.display = isMyOwnProfile ? 'none' : 'block';
+
+        document.getElementById('profileUsernameDisplay').textContent = 'Loading profile...';
+        document.getElementById('profilePictureDisplay').src = '/images/default-profile.png'; // Set a temporary default
+        document.getElementById('profilePostsUsername').textContent = usernameToView; // Set name for posts section
+        document.getElementById('profilePosts').innerHTML = 'Loading posts...';
+
+        const res = await fetch(`/profile/${usernameToView}`);
+        if (!res.ok) {
+            document.getElementById('profileUsernameDisplay').textContent = `Profile for "${usernameToView}" not found.`;
+            document.getElementById('profilePosts').innerHTML = '';
+            currentProfileUser = null;
+            return;
+        }
+        const data = await res.json();
+        currentProfileUser = data.user; // Store the user object for the currently viewed profile
+
+        document.getElementById('profileUsernameDisplay').textContent = data.user.username;
+        document.getElementById('profilePictureDisplay').src = data.user.profilePicture || '/images/default-profile.png';
+        document.getElementById('newUsernameInput').value = data.user.username; // Pre-fill for editing
+
+        // Display posts for the profile being viewed
+        document.getElementById('profilePosts').innerHTML = ''; // Clear previous posts
+        if (data.posts && data.posts.length > 0) {
+            data.posts.forEach(post => {
+                const el = document.createElement('div');
+                el.className = 'post';
+                el.innerHTML = `
+                    <div>
+                        <b>${post.username}</b>
+                        ${String(post.username) === String(loggedInUser) ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}
+                    </div>
+                    <div>${post.text}</div>
+                    ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
+                `;
+                document.getElementById('profilePosts').appendChild(el);
+            });
+        } else {
+            document.getElementById('profilePosts').innerHTML = '<p>No posts yet.</p>';
+        }
+    }
+
+    async function updateProfile() {
+        const newUsername = document.getElementById('newUsernameInput').value.trim();
+        const profilePicFile = document.getElementById('profilePicInput').files[0];
+
+        if (!newUsername && !profilePicFile) {
+            alert('Please provide a new username or select a profile picture.');
+            return;
+        }
+
+        const formData = new FormData();
+        if (newUsername) {
+            formData.append('username', newUsername);
+        }
+        if (profilePicFile) {
+            formData.append('profilePicture', profilePicFile);
+        }
+
+        const res = await fetch('/profile/update', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await res.json();
+
+        if (result.success) {
+            alert(result.message);
+            // Update client-side session data and UI
+            loggedInUser = result.updatedUser.username;
+            loggedInProfilePicture = result.updatedUser.profilePicture || '/images/default-profile.png';
+            updateHeaderUserInfo();
+            openProfile(loggedInUser); // Reload my profile to reflect changes
+        } else {
+            alert(`Failed to update profile: ${result.message}`);
+        }
+    }
 
     // --- Initial Load ---
     document.addEventListener('DOMContentLoaded', fetchSession);
