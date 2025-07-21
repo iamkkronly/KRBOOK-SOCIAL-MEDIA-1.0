@@ -4,25 +4,56 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>KRBOOK</title>
+  <script src="/socket.io/socket.io.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f2f5; }
-    header, main { padding: 1rem; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f2f5; display: flex; flex-direction: column; min-height: 100vh; }
+    header { background: #4267b2; color: white; padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
+    header h2 { margin: 0; }
+    .logout-btn { background: #f44336; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; }
+    main { padding: 1rem; display: flex; flex-grow: 1; }
+    .sidebar { width: 250px; background: white; padding: 1rem; border-radius: 8px; margin-right: 1rem; flex-shrink: 0; }
+    .content-area { flex-grow: 1; display: flex; flex-direction: column; }
     .container { max-width: 600px; margin: auto; }
-    .post { background: white; margin-bottom: 1rem; padding: 1rem; border-radius: 8px; }
-    .post img, .post video { max-width: 100%; height: auto; margin-top: 10px; }
-    .actions { float: right; cursor: pointer; }
-    .auth, #postSection { display: none; }
-    textarea { width: 100%; height: 60px; margin-top: 5px; }
-    input[type="file"] { margin-top: 5px; }
-    .auth input { margin: 5px 0; width: 100%; padding: 8px; }
-    button { padding: 8px 12px; margin-top: 10px; }
+    .post, .chat-item, .friend-request-item, .friend-item, .user-search-result { background: white; margin-bottom: 1rem; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
+    .post img, .post video { max-width: 100%; height: auto; margin-top: 10px; border-radius: 4px; }
+    .actions { float: right; cursor: pointer; font-weight: bold; padding: 0 5px; }
+    .auth, #appContent { display: none; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
+    .auth { padding: 2rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    textarea { width: 100%; height: 60px; margin-top: 5px; border: 1px solid #ddd; border-radius: 4px; padding: 8px; box-sizing: border-box; }
+    input[type="file"], input[type="text"], input[type="password"] { margin: 5px 0; width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+    button { padding: 8px 12px; margin-top: 10px; background: #4267b2; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background 0.3s ease; }
+    button:hover { background: #365899; }
+    .tab-buttons { display: flex; margin-bottom: 1rem; }
+    .tab-buttons button { flex-grow: 1; margin: 0 5px; background: #e9ebee; color: #333; }
+    .tab-buttons button.active { background: #4267b2; color: white; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Chat specific styles */
+    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 120px); background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
+    .chat-messages { flex-grow: 1; overflow-y: auto; padding: 1rem; border-bottom: 1px solid #eee; display: flex; flex-direction: column; }
+    .message-input-area { padding: 1rem; display: flex; border-top: 1px solid #eee; }
+    .message-input-area input { flex-grow: 1; margin-right: 10px; }
+    .message { margin-bottom: 8px; padding: 8px 12px; border-radius: 18px; max-width: 70%; position: relative; }
+    .message.sent { background: #0084ff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+    .message.received { background: #e4e6eb; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; }
+    .message strong { font-size: 0.9em; display: block; margin-bottom: 4px; }
+    .message-time { font-size: 0.7em; opacity: 0.7; margin-top: 5px; text-align: right; }
+    .chat-header { padding: 10px 1rem; border-bottom: 1px solid #eee; background: #f0f2f5; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+
+    .friend-action-btn { background: #28a745; margin-left: 5px; }
+    .friend-action-btn.decline { background: #dc3545; }
+    .friend-action-btn.remove { background: #ffc107; }
+
   </style>
 </head>
 <body>
   <header>
     <h2>KRBOOK</h2>
+    <span id="loggedInUsername"></span>
+    <button id="logoutBtn" class="logout-btn" style="display: none;" onclick="logout()">Logout</button>
   </header>
-  <main class="container">
+  <main>
     <section id="auth" class="auth">
       <h3>Login or Create Account</h3>
       <input id="username" placeholder="Username" />
@@ -30,22 +61,78 @@
       <button onclick="login()">Login / Register</button>
     </section>
 
-    <section id="postSection">
-      <h3>Create Post</h3>
-      <form id="postForm">
-        <textarea name="text" placeholder="What's on your mind?" required></textarea>
-        <input type="file" name="media" accept="image/*,video/*" />
-        <button type="submit">Post</button>
-      </form>
-      <hr />
-      <div id="posts"></div>
-      <button onclick="loadMore()">Load More</button>
-    </section>
+    <div id="appContent" style="display: none; width: 100%;">
+      <div class="sidebar">
+        <h3>Menu</h3>
+        <div class="tab-buttons">
+          <button id="postsTabBtn" class="active" onclick="showTab('postsTab', 'postsTabBtn')">Posts</button>
+          <button id="friendsTabBtn" onclick="showTab('friendsTab', 'friendsTabBtn')">Friends</button>
+          <button id="chatTabBtn" onclick="showTab('chatTab', 'chatTabBtn')">Chat</button>
+        </div>
+
+        <div id="friendsSidebarContent">
+          <h4>Friend Requests</h4>
+          <div id="friendRequestsList"></div>
+          <h4>Your Friends</h4>
+          <div id="friendsList"></div>
+        </div>
+
+        <div id="chatSidebarContent" style="display:none;">
+          <h4>Conversations</h4>
+          <div id="conversationsList"></div>
+        </div>
+      </div>
+
+      <div class="content-area">
+        <section id="postsTab" class="tab-content active container">
+          <h3>Create Post</h3>
+          <form id="postForm">
+            <textarea name="text" placeholder="What's on your mind?" required></textarea>
+            <input type="file" name="media" accept="image/*,video/*" />
+            <button type="submit">Post</button>
+          </form>
+          <hr />
+          <div id="posts"></div>
+          <button onclick="loadMore()">Load More</button>
+        </section>
+
+        <section id="friendsTab" class="tab-content container">
+          <h3>Find Friends</h3>
+          <input type="text" id="userSearchInput" placeholder="Search for users..." onkeyup="searchUsers()">
+          <div id="userSearchResults"></div>
+        </section>
+
+        <section id="chatTab" class="tab-content container" style="height: 100%;">
+          <h3>Private Chat</h3>
+          <div id="activeChatWindow" class="chat-container" style="display: none;">
+            <div class="chat-header">
+              <span id="chatWithUsername"></span>
+              <button onclick="closeChat()">Close Chat</button>
+            </div>
+            <div id="chatMessages" class="chat-messages">
+              </div>
+            <div class="message-input-area">
+              <input type="text" id="messageInput" placeholder="Type a message..." />
+              <button onclick="sendMessage()">Send</button>
+            </div>
+          </div>
+          <div id="noChatSelected" style="text-align: center; padding: 20px; display: block;">
+            Select a conversation or start a new one to chat.
+          </div>
+        </section>
+      </div>
+    </div>
   </main>
 
+  <script src="/socket.io/socket.io.js"></script>
   <script>
     let skip = 0;
     let loggedInUser = null;
+    let loggedInUserId = null;
+    let socket = null;
+    let currentConversationId = null;
+    let currentChatParticipantName = null;
+    let conversationMessagesLoaded = new Set(); // To prevent duplicate message loading
 
     async function login() {
       const username = document.getElementById('username').value;
@@ -57,15 +144,109 @@
       });
       const result = await res.json();
       if (result.success) {
-        loggedInUser = username;
+        loggedInUser = result.username;
+        // Re-fetch session to get userId after login if it wasn't returned in login response
+        await fetchSession();
         document.getElementById('auth').style.display = 'none';
-        document.getElementById('postSection').style.display = 'block';
+        document.getElementById('appContent').style.display = 'flex';
+        document.getElementById('loggedInUsername').textContent = `Logged in as: ${loggedInUser}`;
+        document.getElementById('logoutBtn').style.display = 'block';
+        initializeSocketIo();
         loadPosts();
+        loadFriendRequests();
+        loadFriendsList();
+        loadConversations();
+        showTab('postsTab', 'postsTabBtn'); // Default tab
       } else {
         alert(result.message);
       }
     }
 
+    async function logout() {
+      const res = await fetch('/logout', { method: 'POST' });
+      const result = await res.json();
+      if (result.success) {
+        loggedInUser = null;
+        loggedInUserId = null;
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+        }
+        document.getElementById('auth').style.display = 'flex';
+        document.getElementById('appContent').style.display = 'none';
+        document.getElementById('loggedInUsername').textContent = '';
+        document.getElementById('logoutBtn').style.display = 'none';
+        // Clear all dynamic content
+        document.getElementById('posts').innerHTML = '';
+        document.getElementById('friendRequestsList').innerHTML = '';
+        document.getElementById('friendsList').innerHTML = '';
+        document.getElementById('userSearchResults').innerHTML = '';
+        document.getElementById('conversationsList').innerHTML = '';
+        closeChat(); // Close any active chat
+      } else {
+        alert('Failed to log out.');
+      }
+    }
+
+    async function fetchSession() {
+      const res = await fetch('/session');
+      const data = await res.json();
+      if (data.username && data.userId) {
+        loggedInUser = data.username;
+        loggedInUserId = data.userId;
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('appContent').style.display = 'flex';
+        document.getElementById('loggedInUsername').textContent = `Logged in as: ${loggedInUser}`;
+        document.getElementById('logoutBtn').style.display = 'block';
+        initializeSocketIo();
+        loadPosts();
+        loadFriendRequests();
+        loadFriendsList();
+        loadConversations();
+        showTab('postsTab', 'postsTabBtn'); // Default tab
+      } else {
+        document.getElementById('auth').style.display = 'flex';
+        document.getElementById('appContent').style.display = 'none';
+      }
+    }
+
+    // --- Socket.IO Initialization ---
+    function initializeSocketIo() {
+      if (!socket && loggedInUserId) {
+        socket = io(); // Connect to the Socket.IO server
+        socket.on('connect', () => {
+          console.log('Connected to Socket.IO server');
+          socket.emit('registerUser', loggedInUserId); // Register user with their ID
+        });
+
+        socket.on('disconnect', () => {
+          console.log('Disconnected from Socket.IO server');
+        });
+
+        socket.on('receiveMessage', (message) => {
+          console.log('Message received:', message);
+          if (message.conversation === currentConversationId) {
+            appendMessageToChat(message);
+          }
+          // Also update conversation list with new message/timestamp
+          loadConversations();
+        });
+
+        socket.on('conversationStarted', (data) => {
+          console.log('Conversation started event received:', data);
+          // When a new conversation is started via socket, update the conversations list
+          loadConversations();
+          // Optionally, auto-open the chat if this was a new conversation initiated by this user
+          // openChat(data.conversationId, data.participantNames, data.participants);
+        });
+
+        socket.on('chatError', (errorMsg) => {
+          alert(`Chat error: ${errorMsg}`);
+        });
+      }
+    }
+
+    // --- Post Management ---
     document.getElementById('postForm').onsubmit = async (e) => {
       e.preventDefault();
       const formData = new FormData(e.target);
@@ -73,10 +254,14 @@
         method: 'POST',
         body: formData
       });
-      e.target.reset();
-      skip = 0;
-      document.getElementById('posts').innerHTML = '';
-      loadPosts();
+      if (res.ok) {
+        e.target.reset();
+        skip = 0;
+        document.getElementById('posts').innerHTML = '';
+        loadPosts();
+      } else {
+        alert('Failed to create post. Are you logged in?');
+      }
     };
 
     async function loadPosts() {
@@ -86,11 +271,10 @@
         const el = document.createElement('div');
         el.className = 'post';
         el.innerHTML = `
-          <div><b>${post.username}</b> <span class="actions" onclick="deletePost('${post._id}')">⋮</span></div>
+          <div><b>${post.username}</b> ${post.username === loggedInUser ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}</div>
           <div>${post.text}</div>
           ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
         `;
-        if (post.username !== loggedInUser) el.querySelector('.actions').style.display = 'none';
         document.getElementById('posts').appendChild(el);
       });
       skip += 10;
@@ -102,22 +286,243 @@
 
     async function deletePost(id) {
       if (!confirm('Delete this post?')) return;
-      await fetch(`/post/${id}`, { method: 'DELETE' });
-      skip = 0;
-      document.getElementById('posts').innerHTML = '';
-      loadPosts();
-    }
-
-    fetch('/session').then(res => res.json()).then(data => {
-      if (data.username) {
-        loggedInUser = data.username;
-        document.getElementById('auth').style.display = 'none';
-        document.getElementById('postSection').style.display = 'block';
+      const res = await fetch(`/post/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        skip = 0;
+        document.getElementById('posts').innerHTML = '';
         loadPosts();
       } else {
-        document.getElementById('auth').style.display = 'block';
+        alert('Failed to delete post.');
       }
-    });
+    }
+
+    // --- Tab Management ---
+    function showTab(tabId, buttonId) {
+      document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+      document.querySelectorAll('.tab-buttons button').forEach(btn => btn.classList.remove('active'));
+
+      document.getElementById(tabId).classList.add('active');
+      document.getElementById(buttonId).classList.add('active');
+
+      // Adjust sidebar content visibility based on active tab
+      if (tabId === 'chatTab') {
+        document.getElementById('friendsSidebarContent').style.display = 'none';
+        document.getElementById('chatSidebarContent').style.display = 'block';
+      } else {
+        document.getElementById('friendsSidebarContent').style.display = 'block';
+        document.getElementById('chatSidebarContent').style.display = 'none';
+      }
+    }
+
+    // --- Friend System ---
+    let searchTimeout;
+    function searchUsers() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        const query = document.getElementById('userSearchInput').value;
+        const resultsDiv = document.getElementById('userSearchResults');
+        resultsDiv.innerHTML = '';
+        if (query.length < 2) return;
+
+        const res = await fetch(`/users/search?query=${encodeURIComponent(query)}`);
+        const users = await res.json();
+
+        if (users.length === 0) {
+          resultsDiv.innerHTML = '<p>No users found.</p>';
+          return;
+        }
+
+        users.forEach(user => {
+          const el = document.createElement('div');
+          el.className = 'user-search-result';
+          el.innerHTML = `
+            <span>${user.username}</span>
+            <button onclick="sendFriendRequest('${user.username}')">Add Friend</button>
+          `;
+          resultsDiv.appendChild(el);
+        });
+      }, 300); // Debounce search
+    }
+
+    async function sendFriendRequest(username) {
+      if (!loggedInUser) { alert('Please log in.'); return; }
+      const res = await fetch(`/friends/request/${username}`, { method: 'POST' });
+      const result = await res.json();
+      alert(result.message);
+      if (result.success) {
+        document.getElementById('userSearchResults').innerHTML = ''; // Clear search results
+        document.getElementById('userSearchInput').value = '';
+      }
+    }
+
+    async function loadFriendRequests() {
+      const res = await fetch('/friends/requests/received');
+      const requests = await res.json();
+      const listDiv = document.getElementById('friendRequestsList');
+      listDiv.innerHTML = '';
+
+      if (requests.length === 0) {
+        listDiv.innerHTML = '<p>No pending requests.</p>';
+        return;
+      }
+
+      requests.forEach(req => {
+        const el = document.createElement('div');
+        el.className = 'friend-request-item';
+        el.innerHTML = `
+          <span>${req.requester.username}</span>
+          <button class="friend-action-btn" onclick="acceptFriendRequest('${req.requester.username}')">Accept</button>
+          <button class="friend-action-btn decline" onclick="declineFriendRequest('${req.requester.username}')">Decline</button>
+        `;
+        listDiv.appendChild(el);
+      });
+    }
+
+    async function acceptFriendRequest(username) {
+      const res = await fetch(`/friends/accept/${username}`, { method: 'POST' });
+      const result = await res.json();
+      alert(result.message);
+      if (result.success) {
+        loadFriendRequests();
+        loadFriendsList();
+      }
+    }
+
+    async function declineFriendRequest(username) {
+      const res = await fetch(`/friends/decline/${username}`, { method: 'POST' });
+      const result = await res.json();
+      alert(result.message);
+      if (result.success) {
+        loadFriendRequests();
+      }
+    }
+
+    async function loadFriendsList() {
+      const res = await fetch('/friends/list');
+      const friends = await res.json();
+      const listDiv = document.getElementById('friendsList');
+      listDiv.innerHTML = '';
+
+      if (friends.length === 0) {
+        listDiv.innerHTML = '<p>No friends yet.</p>';
+        return;
+      }
+
+      friends.forEach(friend => {
+        const el = document.createElement('div');
+        el.className = 'friend-item';
+        el.innerHTML = `
+          <span>${friend.username}</span>
+          <button onclick="startChatWithFriend('${friend._id}', '${friend.username}')">Message</button>
+        `;
+        listDiv.appendChild(el);
+      });
+    }
+
+    // --- Chat System ---
+    async function loadConversations() {
+      const res = await fetch('/conversations');
+      const conversations = await res.json();
+      const listDiv = document.getElementById('conversationsList');
+      listDiv.innerHTML = '';
+
+      if (conversations.length === 0) {
+        listDiv.innerHTML = '<p>No conversations.</p>';
+        return;
+      }
+
+      conversations.forEach(conv => {
+        const el = document.createElement('div');
+        el.className = 'chat-item';
+        el.innerHTML = `
+          <div><strong>${conv.participantNames}</strong></div>
+          <small>${conv.lastMessage}</small>
+          <button onclick="openChat('${conv._id}', '${conv.participantNames}', '${conv.participants.map(p => p._id).join(',')}')">Open Chat</button>
+        `;
+        listDiv.appendChild(el);
+      });
+    }
+
+    async function startChatWithFriend(friendId, friendUsername) {
+      if (!socket || !loggedInUserId) {
+        alert('Chat system not ready. Please log in first.');
+        return;
+      }
+      console.log(`Attempting to start conversation with ${friendUsername} (${friendId})`);
+      socket.emit('startConversation', { recipientId: friendId, senderId: loggedInUserId });
+
+      // Listen for the 'conversationStarted' event
+      socket.once('conversationStarted', (data) => {
+        console.log('Conversation started, opening chat:', data);
+        openChat(data.conversationId, data.participantNames, data.participants.map(p => p._id).join(','));
+      });
+    }
+
+    async function openChat(conversationId, participantNames, participantIds) {
+      document.getElementById('noChatSelected').style.display = 'none';
+      document.getElementById('activeChatWindow').style.display = 'flex';
+      document.getElementById('chatWithUsername').textContent = `Chat with: ${participantNames}`;
+      document.getElementById('chatMessages').innerHTML = ''; // Clear previous messages
+      conversationMessagesLoaded.clear(); // Reset loaded messages
+
+      currentConversationId = conversationId;
+      currentChatParticipantName = participantNames;
+
+      // Load messages for this conversation
+      const res = await fetch(`/conversations/${conversationId}/messages`);
+      const messages = await res.json();
+      messages.forEach(msg => appendMessageToChat(msg));
+
+      // Scroll to bottom
+      const chatMessagesDiv = document.getElementById('chatMessages');
+      chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+    }
+
+    function appendMessageToChat(message) {
+      // Use message._id as a unique key to prevent duplicates
+      if (conversationMessagesLoaded.has(message._id)) {
+        return;
+      }
+      conversationMessagesLoaded.add(message._id);
+
+      const chatMessagesDiv = document.getElementById('chatMessages');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message ' + (String(message.sender._id) === String(loggedInUserId) ? 'sent' : 'received');
+      messageDiv.innerHTML = `
+        <strong>${message.sender.username}</strong>
+        <span>${message.text}</span>
+        <div class="message-time">${new Date(message.createdAt).toLocaleTimeString()}</div>
+      `;
+      chatMessagesDiv.appendChild(messageDiv);
+      chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight; // Auto-scroll to latest message
+    }
+
+    function sendMessage() {
+      const messageInput = document.getElementById('messageInput');
+      const text = messageInput.value.trim();
+
+      if (text && currentConversationId && socket && loggedInUserId) {
+        socket.emit('sendMessage', {
+          conversationId: currentConversationId,
+          text: text,
+          senderId: loggedInUserId
+        });
+        messageInput.value = ''; // Clear input
+      }
+    }
+
+    function closeChat() {
+      currentConversationId = null;
+      currentChatParticipantName = null;
+      document.getElementById('activeChatWindow').style.display = 'none';
+      document.getElementById('noChatSelected').style.display = 'block';
+      document.getElementById('chatMessages').innerHTML = ''; // Clear messages
+      conversationMessagesLoaded.clear();
+    }
+
+
+    // --- Initial Load ---
+    document.addEventListener('DOMContentLoaded', fetchSession);
   </script>
 </body>
 </html>
