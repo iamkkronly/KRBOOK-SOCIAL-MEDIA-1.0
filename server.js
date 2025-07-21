@@ -35,9 +35,9 @@ async function connectDatabases() {
       User: conn.model('User', UserSchema),
       Post: conn.model('Post', PostSchema)
     };
+    console.log(`Connected to DB ${i + 1}`); // Added for debugging
   }
 }
-await connectDatabases();
 
 async function getActiveDB() {
   const model = models[currentDB];
@@ -109,8 +109,16 @@ app.delete('/post/:id', async (req, res) => {
     const { Post } = models[i];
     const post = await Post.findById(req.params.id);
     if (post && post.username === req.session.user) {
-      if (post.media) fs.unlink(path.join(__dirname, post.media), () => {});
-      await post.remove();
+      // Use fs.promises.unlink for async unlink
+      if (post.media) {
+        try {
+          await fs.promises.unlink(path.join(__dirname, post.media));
+        } catch (unlinkError) {
+          console.error("Error unlinking file:", unlinkError);
+          // Continue even if unlink fails, post should still be removed from DB
+        }
+      }
+      await Post.deleteOne({ _id: req.params.id }); // Use deleteOne instead of deprecated remove()
       return res.end();
     }
   }
@@ -119,4 +127,16 @@ app.delete('/post/:id', async (req, res) => {
 
 app.use('/uploads', express.static('uploads'));
 
-app.listen(PORT, () => console.log(`KRBOOK running on http://localhost:${PORT}`));
+// New async function to start the server
+async function startServer() {
+  try {
+    await connectDatabases();
+    app.listen(PORT, () => console.log(`KRBOOK running on http://localhost:${PORT}`));
+  } catch (error) {
+    console.error("Failed to connect to databases or start server:", error);
+    process.exit(1); // Exit if critical services fail to start
+  }
+}
+
+// Call the async function to start the server
+startServer();
