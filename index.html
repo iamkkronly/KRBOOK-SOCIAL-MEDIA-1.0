@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KRBOOK</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f2f5; }
+    header, main { padding: 1rem; }
+    .container { max-width: 600px; margin: auto; }
+    .post { background: white; margin-bottom: 1rem; padding: 1rem; border-radius: 8px; }
+    .post img, .post video { max-width: 100%; height: auto; margin-top: 10px; }
+    .actions { float: right; cursor: pointer; }
+    .auth, #postSection { display: none; }
+    textarea { width: 100%; height: 60px; margin-top: 5px; }
+    input[type="file"] { margin-top: 5px; }
+    .auth input { margin: 5px 0; width: 100%; padding: 8px; }
+    button { padding: 8px 12px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>KRBOOK</h2>
+  </header>
+  <main class="container">
+    <section id="auth" class="auth">
+      <h3>Login or Create Account</h3>
+      <input id="username" placeholder="Username" />
+      <input id="password" type="password" placeholder="Password" />
+      <button onclick="login()">Login / Register</button>
+    </section>
+
+    <section id="postSection">
+      <h3>Create Post</h3>
+      <form id="postForm">
+        <textarea name="text" placeholder="What's on your mind?" required></textarea>
+        <input type="file" name="media" accept="image/*,video/*" />
+        <button type="submit">Post</button>
+      </form>
+      <hr />
+      <div id="posts"></div>
+      <button onclick="loadMore()">Load More</button>
+    </section>
+  </main>
+
+  <script>
+    let skip = 0;
+    let loggedInUser = null;
+
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const result = await res.json();
+      if (result.success) {
+        loggedInUser = username;
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('postSection').style.display = 'block';
+        loadPosts();
+      } else {
+        alert(result.message);
+      }
+    }
+
+    document.getElementById('postForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const res = await fetch('/post', {
+        method: 'POST',
+        body: formData
+      });
+      e.target.reset();
+      skip = 0;
+      document.getElementById('posts').innerHTML = '';
+      loadPosts();
+    };
+
+    async function loadPosts() {
+      const res = await fetch(`/posts?skip=${skip}`);
+      const posts = await res.json();
+      posts.forEach(post => {
+        const el = document.createElement('div');
+        el.className = 'post';
+        el.innerHTML = `
+          <div><b>${post.username}</b> <span class="actions" onclick="deletePost('${post._id}')">⋮</span></div>
+          <div>${post.text}</div>
+          ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
+        `;
+        if (post.username !== loggedInUser) el.querySelector('.actions').style.display = 'none';
+        document.getElementById('posts').appendChild(el);
+      });
+      skip += 10;
+    }
+
+    function loadMore() {
+      loadPosts();
+    }
+
+    async function deletePost(id) {
+      if (!confirm('Delete this post?')) return;
+      await fetch(`/post/${id}`, { method: 'DELETE' });
+      skip = 0;
+      document.getElementById('posts').innerHTML = '';
+      loadPosts();
+    }
+
+    fetch('/session').then(res => res.json()).then(data => {
+      if (data.username) {
+        loggedInUser = data.username;
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('postSection').style.display = 'block';
+        loadPosts();
+      } else {
+        document.getElementById('auth').style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>
