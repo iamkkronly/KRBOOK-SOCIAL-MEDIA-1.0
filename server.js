@@ -17,9 +17,9 @@ const DB_URIS = [
   'mongodb+srv://royame3456:mw9TMMUvz1lvxyzu@cluster0.aasr3rw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
   'mongodb+srv://boden32797:YWHjjs7dGAxHyqdv@cluster0.k23yngw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
   'mongodb+srv://nehep52163:9DyClobiZHWcrUkZ@cluster0.vmtxrn6.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
-  'mongodb+srv://fofis98511:lnZ4jkqN7edg3TPz@cluster0.52fvmow.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', // New URI 1
-  'mongodb+srv://hoxow91206:0M3sqwNuPqvXzHVE@cluster0.87yfxeq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', // New URI 2
-  'mongodb+srv://pavel92297:X5ZBEtkDp6njO0bc@cluster0.qvjst5u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'  // New URI 3
+  'mongodb+srv://fofis98511:lnZ4jkqN7edg3TPz@cluster0.52fvmow.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
+  'mongodb+srv://hoxow91206:0M3sqwNuPqvXzHVE@cluster0.87yfxeq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
+  'mongodb+srv://pavel92297:X5ZBEtkDp6njO0bc@cluster0.qvjst5u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
 ];
 
 let currentDB = 0;
@@ -27,7 +27,11 @@ let connections = {};
 let models = {};
 
 // === Mongoose Schemas ===
-const UserSchema = new mongoose.Schema({ username: String, password: String });
+const UserSchema = new mongoose.Schema({
+  username: String,
+  password: String,
+  profilePicture: { type: String, default: '/images/default-profile.png' } // New field
+});
 const PostSchema = new mongoose.Schema({
   username: String,
   text: String,
@@ -40,7 +44,7 @@ const FriendshipSchema = new mongoose.Schema({
   recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'decline', 'blocked'], // Corrected 'decline' to 'declined' based on common practice, assuming this was a typo
+    enum: ['pending', 'accepted', 'declined', 'blocked'], // Ensure 'declined' is consistent
     default: 'pending'
   },
   createdAt: { type: Date, default: Date.now }
@@ -94,6 +98,17 @@ async function fetchAllPosts(skip = 0, limit = 10) {
   return all.slice(0, limit);
 }
 
+async function fetchUserPosts(username, skip = 0, limit = 10) {
+  let userPosts = [];
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbPosts = await models[i].Post.find({ username: username }).sort({ createdAt: -1 }).skip(skip).limit(limit);
+    userPosts = userPosts.concat(dbPosts);
+  }
+  userPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return userPosts.slice(0, limit);
+}
+
+
 // === Express Middleware ===
 app.use(express.static('public')); // Serve static files (including index.html via direct path)
 app.use(express.json());
@@ -119,13 +134,13 @@ const isAuthenticated = (req, res, next) => {
 };
 
 // Multer storage configuration
-// Ensure the 'uploads' directory exists
-if (!fs.existsSync(path.join(__dirname, 'uploads'))) {
-  fs.mkdirSync(path.join(__dirname, 'uploads'));
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
 }
 
 const upload = multer({
-  dest: path.join(__dirname, 'uploads'), // Save directly to a root-level 'uploads' directory
+  dest: uploadsDir, // Save directly to a root-level 'uploads' directory
   limits: { fileSize: 10 * 1024 * 1024 }
 });
 
@@ -142,11 +157,22 @@ app.post('/login', async (req, res) => {
   }
   req.session.user = username;
   req.session.userId = user._id; // Store user ID in session
-  res.json({ success: true, username: username });
+  req.session.profilePicture = user.profilePicture; // Store profile picture in session
+  res.json({ success: true, username: username, userId: user._id, profilePicture: user.profilePicture });
 });
 
-app.get('/session', (req, res) => {
-  res.json({ username: req.session.user, userId: req.session.userId });
+app.get('/session', async (req, res) => {
+  if (req.session.userId) {
+    const { User } = await getActiveDB();
+    const user = await User.findById(req.session.userId).select('username profilePicture');
+    if (user) {
+      // Ensure session is updated with latest profile picture/username if it changed
+      req.session.user = user.username;
+      req.session.profilePicture = user.profilePicture;
+      return res.json({ username: user.username, userId: user._id, profilePicture: user.profilePicture });
+    }
+  }
+  res.json({ username: null, userId: null, profilePicture: null });
 });
 
 app.post('/logout', (req, res) => {
@@ -158,14 +184,12 @@ app.post('/logout', (req, res) => {
 
 // === Post Routes ===
 app.post('/post', isAuthenticated, upload.single('media'), async (req, res) => {
-  // Multer saves to path.join(__dirname, 'uploads')
-  // The media path returned to the client should be relative to the URL '/uploads/'
   const mediaPath = req.file ? '/uploads/' + req.file.filename : null;
   const { Post } = await getActiveDB();
   const post = new Post({
     username: req.session.user,
     text: req.body.text,
-    media: mediaPath // Store the URL path
+    media: mediaPath
   });
   await post.save();
   res.end();
@@ -183,15 +207,12 @@ app.delete('/post/:id', isAuthenticated, async (req, res) => {
     const post = await Post.findById(req.params.id);
     if (post && String(post.username) === String(req.session.user)) {
       if (post.media) {
-        // Construct the full file path for deletion
-        // post.media will be like '/uploads/filename.jpg'
-        const filePath = path.join(__dirname, post.media); // This assumes post.media starts with /uploads/
+        const filePath = path.join(__dirname, post.media);
         try {
           await fs.promises.unlink(filePath);
           console.log(`Deleted file: ${filePath}`);
         } catch (unlinkError) {
           console.error("Error unlinking file:", unlinkError);
-          // Don't block deletion from DB if file unlink fails (e.g., file not found on disk)
         }
       }
       await Post.deleteOne({ _id: req.params.id });
@@ -202,8 +223,80 @@ app.delete('/post/:id', isAuthenticated, async (req, res) => {
 });
 
 // Serve files from the 'uploads' directory
-// This must be placed AFTER app.get('/') if '/' is serving index.html
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Serve uploads from the root 'uploads' directory
+app.use('/uploads', express.static(uploadsDir));
+// Serve default profile images
+app.use('/images', express.static(path.join(__dirname, 'public', 'images')));
+
+
+// === Profile Routes ===
+app.get('/profile/:username', async (req, res) => {
+  const targetUsername = req.params.username;
+  const { User } = await getActiveDB(); // Get User model from an active DB
+  const userProfile = await User.findOne({ username: targetUsername }).select('username profilePicture _id');
+
+  if (!userProfile) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  // Fetch posts by this user from all databases
+  const userPosts = await fetchUserPosts(targetUsername, 0, 20); // Load initial 20 posts
+
+  res.json({
+    user: {
+      _id: userProfile._id,
+      username: userProfile.username,
+      profilePicture: userProfile.profilePicture
+    },
+    posts: userPosts
+  });
+});
+
+app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), async (req, res) => {
+  const { User } = await getActiveDB();
+  const user = await User.findById(req.session.userId);
+
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  // Handle username change
+  if (req.body.username && req.body.username !== user.username) {
+    // Basic check for unique username
+    const existingUser = await User.findOne({ username: req.body.username });
+    if (existingUser && String(existingUser._id) !== String(user._id)) {
+      return res.status(409).json({ message: 'Username already taken' });
+    }
+    user.username = req.body.username;
+    req.session.user = req.body.username; // Update session username
+  }
+
+  // Handle profile picture change
+  if (req.file) {
+    // Delete old profile picture if it's not the default
+    if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
+      const oldProfilePicPath = path.join(__dirname, user.profilePicture);
+      try {
+        await fs.promises.unlink(oldProfilePicPath);
+        console.log(`Deleted old profile picture: ${oldProfilePicPath}`);
+      } catch (unlinkError) {
+        console.warn("Could not delete old profile picture:", unlinkError.message);
+      }
+    }
+    user.profilePicture = '/uploads/' + req.file.filename;
+    req.session.profilePicture = user.profilePicture; // Update session profile picture
+  }
+
+  await user.save();
+  res.json({
+    success: true,
+    message: 'Profile updated successfully',
+    updatedUser: {
+      username: user.username,
+      profilePicture: user.profilePicture
+    }
+  });
+});
+
 
 // === Friend System Routes ===
 app.get('/users/search', isAuthenticated, async (req, res) => {
@@ -499,10 +592,21 @@ io.on('connection', (socket) => {
 async function startServer() {
   try {
     // Create 'uploads' directory if it doesn't exist
-    const uploadsDir = path.join(__dirname, 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       console.log(`Creating uploads directory: ${uploadsDir}`);
       fs.mkdirSync(uploadsDir);
+    }
+    // Create 'public/images' directory if it doesn't exist and copy default profile image
+    const publicImagesDir = path.join(__dirname, 'public', 'images');
+    const defaultProfileImgPath = path.join(publicImagesDir, 'default-profile.png');
+    if (!fs.existsSync(publicImagesDir)) {
+      fs.mkdirSync(publicImagesDir, { recursive: true });
+    }
+    if (!fs.existsSync(defaultProfileImgPath)) {
+      // Create a dummy default-profile.png if it doesn't exist
+      // In a real app, you'd have a proper default image in your public/images folder
+      fs.writeFileSync(defaultProfileImgPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", 'base64'));
+      console.log('Created dummy default-profile.png');
     }
 
     await connectDatabases();
