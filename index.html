@@ -45,6 +45,27 @@
     .friend-action-btn.decline { background: #dc3545; }
     .friend-action-btn.remove { background: #ffc107; }
 
+    /* Reply specific styles */
+    .reply-quote {
+      background: rgba(0,0,0,0.05);
+      border-left: 3px solid #666;
+      padding: 5px 8px;
+      margin-bottom: 5px;
+      font-size: 0.85em;
+      color: #555;
+      border-radius: 3px;
+    }
+    .message .reply-btn {
+      font-size: 0.75em;
+      color: #007bff;
+      cursor: pointer;
+      margin-top: 5px;
+      display: inline-block;
+    }
+    .message .reply-btn:hover {
+      text-decoration: underline;
+    }
+
   </style>
 </head>
 <body>
@@ -112,6 +133,9 @@
             <div id="chatMessages" class="chat-messages">
               </div>
             <div class="message-input-area">
+              <div id="replyingToMessage" class="reply-quote" style="display: none;">
+                Replying to: <span id="replyingToText"></span> <button onclick="cancelReply()">x</button>
+              </div>
               <input type="text" id="messageInput" placeholder="Type a message..." />
               <button onclick="sendMessage()">Send</button>
             </div>
@@ -133,6 +157,8 @@
     let currentConversationId = null;
     let currentChatParticipantName = null;
     let conversationMessagesLoaded = new Set(); // To prevent duplicate message loading
+
+    let replyingTo = null; // Stores message data being replied to: { _id, senderUsername, text }
 
     async function login() {
       const username = document.getElementById('username').value;
@@ -464,6 +490,7 @@
       document.getElementById('chatWithUsername').textContent = `Chat with: ${participantNames}`;
       document.getElementById('chatMessages').innerHTML = ''; // Clear previous messages
       conversationMessagesLoaded.clear(); // Reset loaded messages
+      cancelReply(); // Clear any pending reply
 
       currentConversationId = conversationId;
       currentChatParticipantName = participantNames;
@@ -488,24 +515,59 @@
       const chatMessagesDiv = document.getElementById('chatMessages');
       const messageDiv = document.createElement('div');
       messageDiv.className = 'message ' + (String(message.sender._id) === String(loggedInUserId) ? 'sent' : 'received');
+
+      let replyQuoteHtml = '';
+      // If the message object itself contains a 'replyTo' field (e.g., replyTo: {senderUsername: '...', text: '...'}),
+      // you could render it here. For this current implementation, we're just quoting on the frontend.
+      // If you implement backend reply linking, 'message.replyTo' would be populated.
+      // For now, assume message has sender.username and text for local quoting.
+
       messageDiv.innerHTML = `
         <strong>${message.sender.username}</strong>
         <span>${message.text}</span>
-        <div class="message-time">${new Date(message.createdAt).toLocaleTimeString()}</div>
+        <div class="message-time">
+          ${new Date(message.createdAt).toLocaleTimeString()}
+          <span class="reply-btn" onclick="prepareReply('${message._id}', '${message.sender.username}', \`${message.text}\`)">Reply</span>
+        </div>
       `;
       chatMessagesDiv.appendChild(messageDiv);
       chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight; // Auto-scroll to latest message
     }
 
+    function prepareReply(messageId, senderUsername, messageText) {
+      replyingTo = {
+        _id: messageId,
+        senderUsername: senderUsername,
+        text: messageText
+      };
+      document.getElementById('replyingToText').textContent = `${senderUsername}: "${messageText.substring(0, 30)}${messageText.length > 30 ? '...' : ''}"`;
+      document.getElementById('replyingToMessage').style.display = 'block';
+      document.getElementById('messageInput').focus();
+    }
+
+    function cancelReply() {
+      replyingTo = null;
+      document.getElementById('replyingToMessage').style.display = 'none';
+      document.getElementById('replyingToText').textContent = '';
+    }
+
     function sendMessage() {
       const messageInput = document.getElementById('messageInput');
-      const text = messageInput.value.trim();
+      let text = messageInput.value.trim();
 
       if (text && currentConversationId && socket && loggedInUserId) {
+        if (replyingTo) {
+          // Prepend the reply quote to the message text
+          text = `[Replying to ${replyingTo.senderUsername}: "${replyingTo.text.substring(0, 50)}${replyingTo.text.length > 50 ? '...' : ''}"] ${text}`;
+          cancelReply(); // Clear reply state after sending
+        }
+
         socket.emit('sendMessage', {
           conversationId: currentConversationId,
           text: text,
           senderId: loggedInUserId
+          // You could also pass replyingTo._id here if you want to link replies in the backend
+          // repliedToMessageId: replyingTo ? replyingTo._id : null
         });
         messageInput.value = ''; // Clear input
       }
@@ -518,6 +580,7 @@
       document.getElementById('noChatSelected').style.display = 'block';
       document.getElementById('chatMessages').innerHTML = ''; // Clear messages
       conversationMessagesLoaded.clear();
+      cancelReply(); // Clear any pending reply when chat is closed
     }
 
 
