@@ -1,0 +1,15 @@
+{
+  "name": "krbook",
+  "version": "1.0.0",
+  "description": "KRBOOK social media app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^7.6.1",
+    "multer": "^1.4.5",
+    "express-session": "^1.17.3"
+  }
+}
