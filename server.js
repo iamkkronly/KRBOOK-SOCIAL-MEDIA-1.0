@@ -58,7 +58,14 @@ async function fetchAllPosts(skip = 0, limit = 10) {
   return all.slice(0, limit);
 }
 
+// Serve static files from the 'public' directory
 app.use(express.static('public'));
+
+// Add a route for the root URL to serve index.html
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 app.use(express.json());
 app.use(session({ secret: 'krbook-secret', resave: false, saveUninitialized: true }));
 
