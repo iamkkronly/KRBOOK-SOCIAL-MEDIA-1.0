@@ -115,8 +115,14 @@ const isAuthenticated = (req, res, next) => {
   }
 };
 
+// Multer storage configuration
+// Ensure the 'uploads' directory exists
+if (!fs.existsSync(path.join(__dirname, 'uploads'))) {
+  fs.mkdirSync(path.join(__dirname, 'uploads'));
+}
+
 const upload = multer({
-  dest: 'uploads/',
+  dest: path.join(__dirname, 'uploads'), // Save directly to a root-level 'uploads' directory
   limits: { fileSize: 10 * 1024 * 1024 }
 });
 
@@ -149,12 +155,14 @@ app.post('/logout', (req, res) => {
 
 // === Post Routes ===
 app.post('/post', isAuthenticated, upload.single('media'), async (req, res) => {
+  // Multer saves to path.join(__dirname, 'uploads')
+  // The media path returned to the client should be relative to the URL '/uploads/'
   const mediaPath = req.file ? '/uploads/' + req.file.filename : null;
   const { Post } = await getActiveDB();
   const post = new Post({
     username: req.session.user,
     text: req.body.text,
-    media: mediaPath
+    media: mediaPath // Store the URL path
   });
   await post.save();
   res.end();
@@ -170,12 +178,17 @@ app.delete('/post/:id', isAuthenticated, async (req, res) => {
   for (let i = 0; i < DB_URIS.length; i++) {
     const { Post } = models[i];
     const post = await Post.findById(req.params.id);
-    if (post && String(post.username) === String(req.session.user)) { // Ensure strict equality for username
+    if (post && String(post.username) === String(req.session.user)) {
       if (post.media) {
+        // Construct the full file path for deletion
+        // post.media will be like '/uploads/filename.jpg'
+        const filePath = path.join(__dirname, post.media); // This assumes post.media starts with /uploads/
         try {
-          await fs.promises.unlink(path.join(__dirname, 'public', post.media)); // Adjust path for 'public/uploads'
+          await fs.promises.unlink(filePath);
+          console.log(`Deleted file: ${filePath}`);
         } catch (unlinkError) {
           console.error("Error unlinking file:", unlinkError);
+          // Don't block deletion from DB if file unlink fails (e.g., file not found on disk)
         }
       }
       await Post.deleteOne({ _id: req.params.id });
@@ -185,7 +198,9 @@ app.delete('/post/:id', isAuthenticated, async (req, res) => {
   res.status(403).end();
 });
 
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads'))); // Serve uploads from public/uploads
+// Serve files from the 'uploads' directory
+// This must be placed AFTER app.get('/') if '/' is serving index.html
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // Serve uploads from the root 'uploads' directory
 
 // === Friend System Routes ===
 app.get('/users/search', isAuthenticated, async (req, res) => {
@@ -414,7 +429,6 @@ io.on('connection', (socket) => {
       }
 
       // Optional: Check if they are friends before allowing a conversation
-      // This logic assumes you only allow chats between friends
       const areFriends = await Friendship.findOne({
         $or: [
           { requester: senderId, recipient: recipientId, status: 'accepted' },
@@ -424,7 +438,6 @@ io.on('connection', (socket) => {
 
       if (!areFriends) {
         console.log(`Cannot start conversation: users ${senderId} and ${recipientId} are not friends.`);
-        // Optionally emit an error back to the sender
         const senderSocketId = userSockets.get(String(senderId));
         if (senderSocketId) {
           io.to(senderSocketId).emit('chatError', 'You can only chat with friends.');
@@ -482,6 +495,13 @@ io.on('connection', (socket) => {
 // === Server Start ===
 async function startServer() {
   try {
+    // Create 'uploads' directory if it doesn't exist
+    const uploadsDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      console.log(`Creating uploads directory: ${uploadsDir}`);
+      fs.mkdirSync(uploadsDir);
+    }
+
     await connectDatabases();
     // Use httpServer.listen instead of app.listen for Socket.IO
     httpServer.listen(PORT, () => console.log(`KRBOOK running on http://localhost:${PORT}`));
