@@ -30,12 +30,17 @@ let models = {};
 const UserSchema = new mongoose.Schema({
   username: String,
   password: String,
-  profilePicture: { type: String, default: '/images/default-profile.png' } // New field
+  profilePicture: { type: String, default: '/images/default-profile.png' }, // Can be URL or base64
+  profilePictureData: { type: String }, // Base64 image data
+  profilePictureType: { type: String } // MIME type (image/jpeg, image/png, etc.)
 });
+
 const PostSchema = new mongoose.Schema({
   username: String,
   text: String,
-  media: String,
+  media: String, // Will store "data:image/jpeg;base64,..." or video data
+  mediaType: String, // MIME type
+  mediaSize: Number, // File size in bytes
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -44,7 +49,7 @@ const FriendshipSchema = new mongoose.Schema({
   recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'declined', 'blocked'], // Ensure 'declined' is consistent
+    enum: ['pending', 'accepted', 'declined', 'blocked'],
     default: 'pending'
   },
   createdAt: { type: Date, default: Date.now }
@@ -79,12 +84,17 @@ async function connectDatabases() {
   }
 }
 
+// Modified getActiveDB to check database size and rotate when needed
 async function getActiveDB() {
   const model = models[currentDB];
   const count = await model.Post.estimatedDocumentCount();
+  
+  // Check if current database has too many posts (you can adjust this threshold)
   if (count >= 5000 && currentDB + 1 < DB_URIS.length) {
+    console.log(`Database ${currentDB + 1} is getting full (${count} posts). Switching to database ${currentDB + 2}`);
     currentDB++;
   }
+  
   return models[currentDB];
 }
 
@@ -108,23 +118,36 @@ async function fetchUserPosts(username, skip = 0, limit = 10) {
   return userPosts.slice(0, limit);
 }
 
+// Helper function to convert file to base64
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
+}
+
+// Helper function to convert buffer to base64 data URL
+function bufferToDataURL(buffer, mimeType) {
+  const base64 = buffer.toString('base64');
+  return `data:${mimeType};base64,${base64}`;
+}
 
 // === Express Middleware ===
-app.use(express.static('public')); // Serve static files (including index.html via direct path)
+app.use(express.static('public'));
 app.use(express.json());
 app.use(session({
   secret: 'krbook-secret',
   resave: false,
   saveUninitialized: true,
-  cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+  cookie: { maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// Add a route for the root URL to serve index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Middleware to check if user is authenticated
 const isAuthenticated = (req, res, next) => {
   if (req.session.user) {
     next();
@@ -133,43 +156,87 @@ const isAuthenticated = (req, res, next) => {
   }
 };
 
-// Multer storage configuration
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-}
-
+// Configure multer to store files in memory (not on disk)
 const upload = multer({
-  dest: uploadsDir, // Save directly to a root-level 'uploads' directory
-  limits: { fileSize: 10 * 1024 * 1024 }
+  storage: multer.memoryStorage(), // Store in memory instead of disk
+  limits: { 
+    fileSize: 10 * 1024 * 1024 // 10MB limit as requested
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept images and videos
+    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image and video files are allowed!'), false);
+    }
+  }
 });
 
 // === Authentication Routes ===
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  const { User } = await getActiveDB();
-  let user = await User.findOne({ username });
+  
+  // Search for user across all databases
+  let user = null;
+  let userDB = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const foundUser = await models[i].User.findOne({ username });
+    if (foundUser) {
+      user = foundUser;
+      userDB = i;
+      break;
+    }
+  }
+  
   if (!user) {
+    // Create new user in the current active database
+    const { User } = await getActiveDB();
     user = new User({ username, password });
     await user.save();
   } else if (user.password !== password) {
     return res.json({ success: false, message: 'Wrong password' });
   }
+  
   req.session.user = username;
-  req.session.userId = user._id; // Store user ID in session
-  req.session.profilePicture = user.profilePicture; // Store profile picture in session
-  res.json({ success: true, username: username, userId: user._id, profilePicture: user.profilePicture });
+  req.session.userId = user._id;
+  
+  // Handle profile picture - if it's stored as base64, use it; otherwise use default
+  let profilePicture = '/images/default-profile.png';
+  if (user.profilePictureData && user.profilePictureType) {
+    profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
+  } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
+    profilePicture = user.profilePicture;
+  }
+  
+  req.session.profilePicture = profilePicture;
+  res.json({ success: true, username: username, userId: user._id, profilePicture: profilePicture });
 });
 
 app.get('/session', async (req, res) => {
   if (req.session.userId) {
-    const { User } = await getActiveDB();
-    const user = await User.findById(req.session.userId).select('username profilePicture');
+    // Search for user across all databases
+    let user = null;
+    for (let i = 0; i < DB_URIS.length; i++) {
+      const foundUser = await models[i].User.findById(req.session.userId).select('username profilePicture profilePictureData profilePictureType');
+      if (foundUser) {
+        user = foundUser;
+        break;
+      }
+    }
+    
     if (user) {
-      // Ensure session is updated with latest profile picture/username if it changed
       req.session.user = user.username;
-      req.session.profilePicture = user.profilePicture;
-      return res.json({ username: user.username, userId: user._id, profilePicture: user.profilePicture });
+      
+      let profilePicture = '/images/default-profile.png';
+      if (user.profilePictureData && user.profilePictureType) {
+        profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
+      } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
+        profilePicture = user.profilePicture;
+      }
+      
+      req.session.profilePicture = profilePicture;
+      return res.json({ username: user.username, userId: user._id, profilePicture: profilePicture });
     }
   }
   res.json({ username: null, userId: null, profilePicture: null });
@@ -184,15 +251,39 @@ app.post('/logout', (req, res) => {
 
 // === Post Routes ===
 app.post('/post', isAuthenticated, upload.single('media'), async (req, res) => {
-  const mediaPath = req.file ? '/uploads/' + req.file.filename : null;
-  const { Post } = await getActiveDB();
-  const post = new Post({
-    username: req.session.user,
-    text: req.body.text,
-    media: mediaPath
-  });
-  await post.save();
-  res.end();
+  try {
+    let mediaData = null;
+    let mediaType = null;
+    let mediaSize = 0;
+    
+    if (req.file) {
+      // Convert uploaded file to base64 data URL
+      mediaData = bufferToDataURL(req.file.buffer, req.file.mimetype);
+      mediaType = req.file.mimetype;
+      mediaSize = req.file.size;
+      
+      console.log(`Storing ${mediaType} file of ${mediaSize} bytes in database`);
+    }
+    
+    const { Post } = await getActiveDB();
+    const post = new Post({
+      username: req.session.user,
+      text: req.body.text,
+      media: mediaData, // Store base64 data URL directly
+      mediaType: mediaType,
+      mediaSize: mediaSize
+    });
+    
+    await post.save();
+    console.log(`Post saved to database ${currentDB + 1}`);
+    res.end();
+  } catch (error) {
+    console.error('Error creating post:', error);
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'File size exceeds 10MB limit' });
+    }
+    res.status(500).json({ message: 'Failed to create post' });
+  }
 });
 
 app.get('/posts', async (req, res) => {
@@ -206,117 +297,164 @@ app.delete('/post/:id', isAuthenticated, async (req, res) => {
     const { Post } = models[i];
     const post = await Post.findById(req.params.id);
     if (post && String(post.username) === String(req.session.user)) {
-      if (post.media) {
-        const filePath = path.join(__dirname, post.media);
-        try {
-          await fs.promises.unlink(filePath);
-          console.log(`Deleted file: ${filePath}`);
-        } catch (unlinkError) {
-          console.error("Error unlinking file:", unlinkError);
-        }
-      }
       await Post.deleteOne({ _id: req.params.id });
+      console.log(`Post ${req.params.id} deleted from database ${i + 1}`);
       return res.end();
     }
   }
   res.status(403).end();
 });
 
-// Serve files from the 'uploads' directory
-app.use('/uploads', express.static(uploadsDir));
-// Serve default profile images
+// Serve default profile images (keep this for default images)
 app.use('/images', express.static(path.join(__dirname, 'public', 'images')));
-
 
 // === Profile Routes ===
 app.get('/profile/:username', async (req, res) => {
   const targetUsername = req.params.username;
-  const { User } = await getActiveDB(); // Get User model from an active DB
-  const userProfile = await User.findOne({ username: targetUsername }).select('username profilePicture _id');
+  
+  // Search for user across all databases
+  let userProfile = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const foundUser = await models[i].User.findOne({ username: targetUsername }).select('username profilePicture profilePictureData profilePictureType _id');
+    if (foundUser) {
+      userProfile = foundUser;
+      break;
+    }
+  }
 
   if (!userProfile) {
     return res.status(404).json({ message: 'User not found' });
   }
 
   // Fetch posts by this user from all databases
-  const userPosts = await fetchUserPosts(targetUsername, 0, 20); // Load initial 20 posts
+  const userPosts = await fetchUserPosts(targetUsername, 0, 20);
+
+  // Handle profile picture
+  let profilePicture = '/images/default-profile.png';
+  if (userProfile.profilePictureData && userProfile.profilePictureType) {
+    profilePicture = `data:${userProfile.profilePictureType};base64,${userProfile.profilePictureData}`;
+  } else if (userProfile.profilePicture && userProfile.profilePicture !== '/images/default-profile.png') {
+    profilePicture = userProfile.profilePicture;
+  }
 
   res.json({
     user: {
       _id: userProfile._id,
       username: userProfile.username,
-      profilePicture: userProfile.profilePicture
+      profilePicture: profilePicture
     },
     posts: userPosts
   });
 });
 
 app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), async (req, res) => {
-  const { User } = await getActiveDB();
-  const user = await User.findById(req.session.userId);
-
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' });
-  }
-
-  // Handle username change
-  if (req.body.username && req.body.username !== user.username) {
-    // Basic check for unique username
-    const existingUser = await User.findOne({ username: req.body.username });
-    if (existingUser && String(existingUser._id) !== String(user._id)) {
-      return res.status(409).json({ message: 'Username already taken' });
-    }
-    user.username = req.body.username;
-    req.session.user = req.body.username; // Update session username
-  }
-
-  // Handle profile picture change
-  if (req.file) {
-    // Delete old profile picture if it's not the default
-    if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
-      const oldProfilePicPath = path.join(__dirname, user.profilePicture);
-      try {
-        await fs.promises.unlink(oldProfilePicPath);
-        console.log(`Deleted old profile picture: ${oldProfilePicPath}`);
-      } catch (unlinkError) {
-        console.warn("Could not delete old profile picture:", unlinkError.message);
+  try {
+    // Find user across all databases
+    let user = null;
+    let userDB = null;
+    
+    for (let i = 0; i < DB_URIS.length; i++) {
+      const foundUser = await models[i].User.findById(req.session.userId);
+      if (foundUser) {
+        user = foundUser;
+        userDB = i;
+        break;
       }
     }
-    user.profilePicture = '/uploads/' + req.file.filename;
-    req.session.profilePicture = user.profilePicture; // Update session profile picture
-  }
 
-  await user.save();
-  res.json({
-    success: true,
-    message: 'Profile updated successfully',
-    updatedUser: {
-      username: user.username,
-      profilePicture: user.profilePicture
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
     }
-  });
-});
 
+    // Handle username change
+    if (req.body.username && req.body.username !== user.username) {
+      // Check for unique username across all databases
+      let existingUser = null;
+      for (let i = 0; i < DB_URIS.length; i++) {
+        const foundUser = await models[i].User.findOne({ username: req.body.username });
+        if (foundUser && String(foundUser._id) !== String(user._id)) {
+          existingUser = foundUser;
+          break;
+        }
+      }
+      
+      if (existingUser) {
+        return res.status(409).json({ message: 'Username already taken' });
+      }
+      
+      user.username = req.body.username;
+      req.session.user = req.body.username;
+    }
+
+    // Handle profile picture change
+    if (req.file) {
+      // Store new profile picture as base64
+      user.profilePictureData = req.file.buffer.toString('base64');
+      user.profilePictureType = req.file.mimetype;
+      user.profilePicture = `data:${req.file.mimetype};base64,${user.profilePictureData}`;
+      req.session.profilePicture = user.profilePicture;
+      
+      console.log(`Profile picture updated for user ${user.username} in database ${userDB + 1}`);
+    }
+
+    await user.save();
+    
+    let profilePicture = '/images/default-profile.png';
+    if (user.profilePictureData && user.profilePictureType) {
+      profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
+    }
+    
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      updatedUser: {
+        username: user.username,
+        profilePicture: profilePicture
+      }
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'Profile picture size exceeds 10MB limit' });
+    }
+    res.status(500).json({ message: 'Failed to update profile' });
+  }
+});
 
 // === Friend System Routes ===
 app.get('/users/search', isAuthenticated, async (req, res) => {
   const { query } = req.query;
   if (!query) return res.json([]);
-  const { User } = await getActiveDB();
-  // Find users whose username starts with the query, excluding the current user
-  const users = await User.find({
-    username: { $regex: '^' + query, $options: 'i' },
-    _id: { $ne: req.session.userId }
-  }).select('username');
+  
+  let users = [];
+  // Search across all databases
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbUsers = await models[i].User.find({
+      username: { $regex: '^' + query, $options: 'i' },
+      _id: { $ne: req.session.userId }
+    }).select('username');
+    users = users.concat(dbUsers);
+  }
+  
   res.json(users);
 });
 
 app.post('/friends/request/:recipientUsername', isAuthenticated, async (req, res) => {
   const { recipientUsername } = req.params;
-  const { User, Friendship } = await getActiveDB();
-
-  const requester = await User.findById(req.session.userId);
-  const recipient = await User.findOne({ username: recipientUsername });
+  
+  // Find requester and recipient across all databases
+  let requester = null;
+  let recipient = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    if (!requester) {
+      requester = await models[i].User.findById(req.session.userId);
+    }
+    if (!recipient) {
+      recipient = await models[i].User.findOne({ username: recipientUsername });
+    }
+    if (requester && recipient) break;
+  }
 
   if (!requester || !recipient) {
     return res.status(404).json({ message: 'User not found' });
@@ -325,18 +463,23 @@ app.post('/friends/request/:recipientUsername', isAuthenticated, async (req, res
     return res.status(400).json({ message: 'Cannot send friend request to yourself' });
   }
 
-  // Check if a request already exists or if they are already friends
-  const existingFriendship = await Friendship.findOne({
-    $or: [
-      { requester: requester._id, recipient: recipient._id },
-      { requester: recipient._id, recipient: requester._id }
-    ]
-  });
+  // Check if a request already exists across all databases
+  let existingFriendship = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    existingFriendship = await models[i].Friendship.findOne({
+      $or: [
+        { requester: requester._id, recipient: recipient._id },
+        { requester: recipient._id, recipient: requester._id }
+      ]
+    });
+    if (existingFriendship) break;
+  }
 
   if (existingFriendship) {
     return res.status(409).json({ message: 'Friend request already sent or users are already friends' });
   }
 
+  const { Friendship } = await getActiveDB();
   const newFriendship = new Friendship({
     requester: requester._id,
     recipient: recipient._id,
@@ -348,20 +491,35 @@ app.post('/friends/request/:recipientUsername', isAuthenticated, async (req, res
 
 app.post('/friends/accept/:requesterUsername', isAuthenticated, async (req, res) => {
   const { requesterUsername } = req.params;
-  const { User, Friendship } = await getActiveDB();
-
-  const recipient = await User.findById(req.session.userId);
-  const requester = await User.findOne({ username: requesterUsername });
+  
+  // Find users across all databases
+  let recipient = null;
+  let requester = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    if (!recipient) {
+      recipient = await models[i].User.findById(req.session.userId);
+    }
+    if (!requester) {
+      requester = await models[i].User.findOne({ username: requesterUsername });
+    }
+    if (recipient && requester) break;
+  }
 
   if (!requester || !recipient) {
     return res.status(404).json({ message: 'User not found' });
   }
 
-  const friendship = await Friendship.findOneAndUpdate(
-    { requester: requester._id, recipient: recipient._id, status: 'pending' },
-    { status: 'accepted' },
-    { new: true }
-  );
+  // Find and update friendship across all databases
+  let friendship = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    friendship = await models[i].Friendship.findOneAndUpdate(
+      { requester: requester._id, recipient: recipient._id, status: 'pending' },
+      { status: 'accepted' },
+      { new: true }
+    );
+    if (friendship) break;
+  }
 
   if (!friendship) {
     return res.status(404).json({ message: 'Pending friend request not found' });
@@ -372,18 +530,33 @@ app.post('/friends/accept/:requesterUsername', isAuthenticated, async (req, res)
 
 app.post('/friends/decline/:requesterUsername', isAuthenticated, async (req, res) => {
   const { requesterUsername } = req.params;
-  const { User, Friendship } = await getActiveDB();
-
-  const recipient = await User.findById(req.session.userId);
-  const requester = await User.findOne({ username: requesterUsername });
+  
+  // Find users across all databases
+  let recipient = null;
+  let requester = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    if (!recipient) {
+      recipient = await models[i].User.findById(req.session.userId);
+    }
+    if (!requester) {
+      requester = await models[i].User.findOne({ username: requesterUsername });
+    }
+    if (recipient && requester) break;
+  }
 
   if (!requester || !recipient) {
     return res.status(404).json({ message: 'User not found' });
   }
 
-  const friendship = await Friendship.findOneAndDelete(
-    { requester: requester._id, recipient: recipient._id, status: 'pending' }
-  );
+  // Find and delete friendship across all databases
+  let friendship = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    friendship = await models[i].Friendship.findOneAndDelete(
+      { requester: requester._id, recipient: recipient._id, status: 'pending' }
+    );
+    if (friendship) break;
+  }
 
   if (!friendship) {
     return res.status(404).json({ message: 'Pending friend request not found' });
@@ -393,24 +566,30 @@ app.post('/friends/decline/:requesterUsername', isAuthenticated, async (req, res
 });
 
 app.get('/friends/requests/received', isAuthenticated, async (req, res) => {
-  const { Friendship } = await getActiveDB();
-  const requests = await Friendship.find({
-    recipient: req.session.userId,
-    status: 'pending'
-  }).populate('requester', 'username'); // Populate sender's username
+  let requests = [];
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbRequests = await models[i].Friendship.find({
+      recipient: req.session.userId,
+      status: 'pending'
+    }).populate('requester', 'username');
+    requests = requests.concat(dbRequests);
+  }
   res.json(requests);
 });
 
 app.get('/friends/list', isAuthenticated, async (req, res) => {
-  const { Friendship } = await getActiveDB();
-  const friends = await Friendship.find({
-    $or: [
-      { requester: req.session.userId, status: 'accepted' },
-      { recipient: req.session.userId, status: 'accepted' }
-    ]
-  }).populate('requester recipient', 'username'); // Populate both fields
+  let friends = [];
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbFriends = await models[i].Friendship.find({
+      $or: [
+        { requester: req.session.userId, status: 'accepted' },
+        { recipient: req.session.userId, status: 'accepted' }
+      ]
+    }).populate('requester recipient', 'username');
+    friends = friends.concat(dbFriends);
+  }
+  
   res.json(friends.map(f => {
-    // Return the friend's username, not the current user's
     if (String(f.requester._id) === String(req.session.userId)) {
       return { _id: f.recipient._id, username: f.recipient.username };
     } else {
@@ -421,13 +600,16 @@ app.get('/friends/list', isAuthenticated, async (req, res) => {
 
 // === Chat System Routes ===
 app.get('/conversations', isAuthenticated, async (req, res) => {
-  const { Conversation } = await getActiveDB();
-  const conversations = await Conversation.find({
-    participants: req.session.userId
-  })
-    .populate('participants', 'username')
-    .populate('lastMessage') // Optional: populate last message for display
-    .sort({ updatedAt: -1 });
+  let conversations = [];
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbConversations = await models[i].Conversation.find({
+      participants: req.session.userId
+    })
+      .populate('participants', 'username')
+      .populate('lastMessage')
+      .sort({ updatedAt: -1 });
+    conversations = conversations.concat(dbConversations);
+  }
 
   res.json(conversations.map(conv => {
     const otherParticipants = conv.participants.filter(p => String(p._id) !== String(req.session.userId));
@@ -443,59 +625,73 @@ app.get('/conversations', isAuthenticated, async (req, res) => {
 
 app.get('/conversations/:conversationId/messages', isAuthenticated, async (req, res) => {
   const { conversationId } = req.params;
-  const { Conversation, Message } = await getActiveDB();
-
-  const conversation = await Conversation.findById(conversationId);
+  
+  // Find conversation across all databases
+  let conversation = null;
+  let conversationDB = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    conversation = await models[i].Conversation.findById(conversationId);
+    if (conversation) {
+      conversationDB = i;
+      break;
+    }
+  }
+  
   if (!conversation || !conversation.participants.includes(req.session.userId)) {
     return res.status(403).json({ message: 'Access denied to this conversation' });
   }
 
-  const messages = await Message.find({ conversation: conversationId })
+  const messages = await models[conversationDB].Message.find({ conversation: conversationId })
     .populate('sender', 'username')
-    .sort({ createdAt: 1 }); // Oldest first
+    .sort({ createdAt: 1 });
 
   res.json(messages);
 });
 
 // === Socket.IO for Real-time Chat ===
-const userSockets = new Map(); // userId -> socketId
+const userSockets = new Map();
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  // Store user's socket ID when they join (e.g., after successful login)
   socket.on('registerUser', (userId) => {
     userSockets.set(userId, socket.id);
     console.log(`User ${userId} registered with socket ${socket.id}`);
   });
 
-  // Handle incoming chat messages
   socket.on('sendMessage', async ({ conversationId, text, senderId }) => {
     try {
-      const { Conversation, Message } = await getActiveDB();
-
-      const conversation = await Conversation.findById(conversationId);
-      if (!conversation || !conversation.participants.includes(senderId)) {
-        console.error(`User ${senderId} tried to send message to unauthorized conversation ${conversationId}`);
-        return; // Do not process unauthorized messages
+      // Find conversation across all databases
+      let conversation = null;
+      let conversationDB = null;
+      
+      for (let i = 0; i < DB_URIS.length; i++) {
+        conversation = await models[i].Conversation.findById(conversationId);
+        if (conversation) {
+          conversationDB = i;
+          break;
+        }
       }
 
-      const message = new Message({
+      if (!conversation || !conversation.participants.includes(senderId)) {
+        console.error(`User ${senderId} tried to send message to unauthorized conversation ${conversationId}`);
+        return;
+      }
+
+      const message = new models[conversationDB].Message({
         conversation: conversationId,
         sender: senderId,
         text: text
       });
       await message.save();
 
-      // Update conversation's last message and updatedAt
       conversation.lastMessage = message._id;
       conversation.updatedAt = new Date();
       await conversation.save();
 
-      // Populate sender username for broadcasting
-      const populatedMessage = await Message.findById(message._id).populate('sender', 'username');
+      const populatedMessage = await models[conversationDB].Message.findById(message._id).populate('sender', 'username');
 
-      // Emit message to all participants in the conversation
       for (const participantId of conversation.participants) {
         const targetSocketId = userSockets.get(String(participantId));
         if (targetSocketId) {
@@ -511,26 +707,38 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle starting a new conversation (or finding an existing one)
   socket.on('startConversation', async ({ recipientId, senderId }) => {
     try {
-      const { User, Conversation, Friendship } = await getActiveDB();
+      // Find users across all databases
+      let sender = null;
+      let recipient = null;
+      
+      for (let i = 0; i < DB_URIS.length; i++) {
+        if (!sender) {
+          sender = await models[i].User.findById(senderId);
+        }
+        if (!recipient) {
+          recipient = await models[i].User.findById(recipientId);
+        }
+        if (sender && recipient) break;
+      }
 
-      // Ensure both users exist
-      const sender = await User.findById(senderId);
-      const recipient = await User.findById(recipientId);
       if (!sender || !recipient) {
         console.error(`Invalid sender or recipient for new conversation: ${senderId}, ${recipientId}`);
         return;
       }
 
-      // Optional: Check if they are friends before allowing a conversation
-      const areFriends = await Friendship.findOne({
-        $or: [
-          { requester: senderId, recipient: recipientId, status: 'accepted' },
-          { requester: recipientId, recipient: senderId, status: 'accepted' }
-        ]
-      });
+      // Check if they are friends across all databases
+      let areFriends = null;
+      for (let i = 0; i < DB_URIS.length; i++) {
+        areFriends = await models[i].Friendship.findOne({
+          $or: [
+            { requester: senderId, recipient: recipientId, status: 'accepted' },
+            { requester: recipientId, recipient: senderId, status: 'accepted' }
+          ]
+        });
+        if (areFriends) break;
+      }
 
       if (!areFriends) {
         console.log(`Cannot start conversation: users ${senderId} and ${recipientId} are not friends.`);
@@ -541,27 +749,36 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Try to find an existing conversation
-      let conversation = await Conversation.findOne({
-        participants: { $all: [senderId, recipientId], $size: 2 } // For 1-on-1 chats
-      });
+      // Try to find existing conversation across all databases
+      let conversation = null;
+      let conversationDB = null;
+      
+      for (let i = 0; i < DB_URIS.length; i++) {
+        conversation = await models[i].Conversation.findOne({
+          participants: { $all: [senderId, recipientId], $size: 2 }
+        });
+        if (conversation) {
+          conversationDB = i;
+          break;
+        }
+      }
 
       if (!conversation) {
-        // Create new conversation if none exists
+        // Create new conversation in active database
+        const { Conversation } = await getActiveDB();
         conversation = new Conversation({
           participants: [senderId, recipientId]
         });
         await conversation.save();
         console.log(`New conversation created: ${conversation._id}`);
+        conversationDB = currentDB;
       } else {
         console.log(`Existing conversation found: ${conversation._id}`);
       }
 
-      // Emit the conversation details back to the sender
       const senderSocketId = userSockets.get(String(senderId));
       if (senderSocketId) {
-        // Populate participants' usernames for the frontend
-        const populatedConversation = await Conversation.findById(conversation._id).populate('participants', 'username');
+        const populatedConversation = await models[conversationDB].Conversation.findById(conversation._id).populate('participants', 'username');
         io.to(senderSocketId).emit('conversationStarted', {
           conversationId: populatedConversation._id,
           participants: populatedConversation.participants,
@@ -574,10 +791,8 @@ io.on('connection', (socket) => {
     }
   });
 
-
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
-    // Remove disconnected socket from map
     for (let [userId, sockId] of userSockets.entries()) {
       if (sockId === socket.id) {
         userSockets.delete(userId);
@@ -591,11 +806,6 @@ io.on('connection', (socket) => {
 // === Server Start ===
 async function startServer() {
   try {
-    // Create 'uploads' directory if it doesn't exist
-    if (!fs.existsSync(uploadsDir)) {
-      console.log(`Creating uploads directory: ${uploadsDir}`);
-      fs.mkdirSync(uploadsDir);
-    }
     // Create 'public/images' directory if it doesn't exist and copy default profile image
     const publicImagesDir = path.join(__dirname, 'public', 'images');
     const defaultProfileImgPath = path.join(publicImagesDir, 'default-profile.png');
@@ -604,13 +814,14 @@ async function startServer() {
     }
     if (!fs.existsSync(defaultProfileImgPath)) {
       // Create a dummy default-profile.png if it doesn't exist
-      // In a real app, you'd have a proper default image in your public/images folder
       fs.writeFileSync(defaultProfileImgPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", 'base64'));
       console.log('Created dummy default-profile.png');
     }
 
     await connectDatabases();
-    // Use httpServer.listen instead of app.listen for Socket.IO
+    console.log('All databases connected. Images will be stored directly in MongoDB.');
+    console.log(`Currently using database ${currentDB + 1} for new posts.`);
+    
     httpServer.listen(PORT, () => console.log(`KRBOOK running on http://localhost:${PORT}`));
   } catch (error) {
     console.error("Failed to connect to databases or start server:", error);
