@@ -44,22 +44,6 @@ const PostSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// New schema for handling chunked video uploads
-const VideoUploadSchema = new mongoose.Schema({
-  username: String,
-  fileName: String,
-  fileType: String,
-  fileSize: Number,
-  chunks: [{
-    data: String, // Base64 chunk data
-    offset: Number,
-    size: Number
-  }],
-  uploadedSize: { type: Number, default: 0 },
-  isComplete: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
-});
-
 const FriendshipSchema = new mongoose.Schema({
   requester: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -92,7 +76,6 @@ async function connectDatabases() {
     models[i] = {
       User: conn.model('User', UserSchema),
       Post: conn.model('Post', PostSchema),
-      VideoUpload: conn.model('VideoUpload', VideoUploadSchema),
       Friendship: conn.model('Friendship', FriendshipSchema),
       Conversation: conn.model('Conversation', ConversationSchema),
       Message: conn.model('Message', MessageSchema)
@@ -133,6 +116,16 @@ async function fetchUserPosts(username, skip = 0, limit = 10) {
   }
   userPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return userPosts.slice(0, limit);
+}
+
+// Helper function to convert file to base64
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
 }
 
 // Helper function to convert buffer to base64 data URL
@@ -290,161 +283,6 @@ app.post('/post', isAuthenticated, upload.single('media'), async (req, res) => {
       return res.status(400).json({ message: 'File size exceeds 10MB limit' });
     }
     res.status(500).json({ message: 'Failed to create post' });
-  }
-});
-
-// FIXED: New route for chunked video upload with proper error handling
-app.post('/post/upload-chunk', isAuthenticated, upload.single('media'), async (req, res) => {
-  try {
-    // Log the incoming request for debugging
-    console.log('Chunk upload request received');
-    console.log('Body:', req.body);
-    console.log('File:', req.file ? { size: req.file.size, mimetype: req.file.mimetype } : 'No file');
-    
-    const { fileName, fileType, fileSize, offset, text } = req.body;
-    
-    // Validate all required fields
-    if (!fileName) {
-      console.error('Missing fileName');
-      return res.status(400).json({ message: 'Missing fileName' });
-    }
-    if (!fileType) {
-      console.error('Missing fileType');
-      return res.status(400).json({ message: 'Missing fileType' });
-    }
-    if (!fileSize) {
-      console.error('Missing fileSize');
-      return res.status(400).json({ message: 'Missing fileSize' });
-    }
-    if (offset === undefined || offset === null) {
-      console.error('Missing offset');
-      return res.status(400).json({ message: 'Missing offset' });
-    }
-    if (!req.file) {
-      console.error('No file uploaded');
-      return res.status(400).json({ message: 'No file uploaded' });
-    }
-    
-    const chunkData = req.file.buffer.toString('base64');
-    console.log(`Processing chunk: offset=${offset}, size=${req.file.size}, fileName=${fileName}`);
-    
-    const { VideoUpload } = await getActiveDB();
-    
-    // Find or create video upload record
-    let videoUpload = await VideoUpload.findOne({ 
-      username: req.session.user, 
-      fileName: fileName,
-      isComplete: false 
-    });
-    
-    if (!videoUpload) {
-      console.log('Creating new VideoUpload record');
-      videoUpload = new VideoUpload({
-        username: req.session.user,
-        fileName: fileName,
-        fileType: fileType,
-        fileSize: parseInt(fileSize),
-        chunks: [],
-        uploadedSize: 0
-      });
-    }
-    
-    // Add chunk to the upload
-    videoUpload.chunks.push({
-      data: chunkData,
-      offset: parseInt(offset),
-      size: req.file.size
-    });
-    
-    videoUpload.uploadedSize += req.file.size;
-    
-    // Check if upload is complete
-    if (videoUpload.uploadedSize >= parseInt(fileSize)) {
-      videoUpload.isComplete = true;
-      console.log('Video upload marked as complete');
-    }
-    
-    await videoUpload.save();
-    console.log(`Chunk saved successfully. Progress: ${videoUpload.uploadedSize}/${fileSize}`);
-    
-    res.json({ 
-      success: true, 
-      uploadedSize: videoUpload.uploadedSize,
-      isComplete: videoUpload.isComplete 
-    });
-    
-  } catch (error) {
-    console.error('Error in upload-chunk:', error);
-    res.status(500).json({ message: 'Internal server error during chunk upload', error: error.message });
-  }
-});
-
-// FIXED: New route to finalize video upload and create post with proper error handling
-app.post('/post/finalize', isAuthenticated, async (req, res) => {
-  try {
-    console.log('Finalize request received');
-    console.log('Body:', req.body);
-    
-    const { fileName, fileType, fileSize, text } = req.body;
-    
-    // Validate required fields
-    if (!fileName) {
-      console.error('Missing fileName in finalize');
-      return res.status(400).json({ message: 'Missing fileName' });
-    }
-    if (!fileType) {
-      console.error('Missing fileType in finalize');
-      return res.status(400).json({ message: 'Missing fileType' });
-    }
-    if (!fileSize) {
-      console.error('Missing fileSize in finalize');
-      return res.status(400).json({ message: 'Missing fileSize' });
-    }
-    
-    const { VideoUpload, Post } = await getActiveDB();
-    
-    // Find the completed video upload
-    const videoUpload = await VideoUpload.findOne({ 
-      username: req.session.user, 
-      fileName: fileName,
-      isComplete: true 
-    });
-    
-    if (!videoUpload) {
-      console.error('VideoUpload not found or not complete');
-      return res.status(404).json({ message: 'Video upload not found or not complete' });
-    }
-    
-    console.log(`Found VideoUpload with ${videoUpload.chunks.length} chunks`);
-    
-    // Sort chunks by offset and combine them
-    videoUpload.chunks.sort((a, b) => a.offset - b.offset);
-    const combinedBase64 = videoUpload.chunks.map(chunk => chunk.data).join('');
-    const mediaData = `data:${fileType};base64,${combinedBase64}`;
-    
-    console.log(`Combined video data length: ${mediaData.length} characters`);
-    
-    // Create the post
-    const post = new Post({
-      username: req.session.user,
-      text: text || '',
-      media: mediaData,
-      mediaType: fileType,
-      mediaSize: parseInt(fileSize)
-    });
-    
-    await post.save();
-    console.log(`Video post created successfully for user ${req.session.user}`);
-    
-    // Clean up the video upload record
-    await VideoUpload.deleteOne({ _id: videoUpload._id });
-    console.log('VideoUpload record cleaned up');
-    
-    res.json({ success: true });
-    
-  } catch (error) {
-    console.error('Error in finalize:', error);
-    res.status(500).json({ message: 'Internal server error during finalization', error: error.message });
   }
 });
 
@@ -981,7 +819,7 @@ async function startServer() {
     }
 
     await connectDatabases();
-    console.log('All databases connected. Images and videos will be stored directly in MongoDB.');
+    console.log('All databases connected. Images will be stored directly in MongoDB.');
     console.log(`Currently using database ${currentDB + 1} for new posts.`);
     
     httpServer.listen(PORT, () => console.log(`KRBOOK running on http://localhost:${PORT}`));
