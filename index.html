@@ -57,7 +57,7 @@
       position: relative;
     }
     .upload-progress-fill::after {
-      content: '';
+      content: "";
       position: absolute;
       top: 0;
       left: 0;
@@ -90,6 +90,12 @@
       margin-top: 5px;
       font-size: 12px;
       color: #6c757d;
+    }
+    .upload-controls {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 10px;
     }
 
     /* Chat specific styles */
@@ -249,10 +255,10 @@
       <div class="sidebar">
         <h3>Menu</h3>
         <div class="tab-buttons">
-          <button id="postsTabBtn" class="active" onclick="showTab('postsTab', 'postsTabBtn')">Posts</button>
+          <button id="postsTabBtn" class="active" onclick="showTab("postsTab", "postsTabBtn")">Posts</button>
           <button id="profileTabBtn" onclick="showMyProfile()">My Profile</button>
-          <button id="friendsTabBtn" onclick="showTab('friendsTab', 'friendsTabBtn')">Friends</button>
-          <button id="chatTabBtn" onclick="showTab('chatTab', 'chatTabBtn')">Chat</button>
+          <button id="friendsTabBtn" onclick="showTab("friendsTab", "friendsTabBtn")">Friends</button>
+          <button id="chatTabBtn" onclick="showTab("chatTab", "chatTabBtn")">Chat</button>
         </div>
 
         <div id="friendsSidebarContent">
@@ -273,7 +279,7 @@
           <h3>Create Post</h3>
           <form id="postForm">
             <textarea name="text" placeholder="What's on your mind?" required></textarea>
-            <input type="file" name="media" accept="image/*,video/*" />
+            <input type="file" name="media" id="mediaFileInput" accept="image/*,video/*" />
             <button type="submit" id="postSubmitBtn">Post</button>
             
             <!-- Upload Progress Container -->
@@ -283,6 +289,11 @@
               </div>
               <div id="uploadProgressText" class="upload-progress-text">Uploading... 0%</div>
               <div id="uploadStatus" class="upload-status">Preparing upload...</div>
+              <div class="upload-controls">
+                <button type="button" id="pauseUploadBtn" style="display:none;">Pause</button>
+                <button type="button" id="resumeUploadBtn" style="display:none;">Resume</button>
+                <button type="button" id="cancelUploadBtn" style="display:none;">Cancel</button>
+              </div>
             </div>
           </form>
           <hr />
@@ -351,7 +362,7 @@
     let skip = 0; // For main feed posts
     let loggedInUser = null;
     let loggedInUserId = null;
-    let loggedInProfilePicture = '/images/default-profile.png';
+    let loggedInProfilePicture = ";/images/default-profile.png";
     let socket = null;
     let currentConversationId = null;
     let currentChatParticipantName = null;
@@ -364,108 +375,114 @@
     let currentUploadXHR = null;
     let currentProfileUploadXHR = null;
 
+    // Video upload specific variables
+    let videoFile = null;
+    let videoUploadOffset = 0;
+    let videoUploadPaused = false;
+    const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+
     async function login() {
-      const username = document.getElementById('username').value;
-      const password = document.getElementById('password').value;
-      const res = await fetch('/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      const res = await fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password })
       });
       const result = await res.json();
       if (result.success) {
         loggedInUser = result.username;
         loggedInUserId = result.userId;
-        loggedInProfilePicture = result.profilePicture || '/images/default-profile.png'; // Use default if not set
+        loggedInProfilePicture = result.profilePicture || "/images/default-profile.png"; // Use default if not set
 
-        document.getElementById('auth').style.display = 'none';
-        document.getElementById('appContent').style.display = 'flex';
+        document.getElementById("auth").style.display = "none";
+        document.getElementById("appContent").style.display = "flex";
         updateHeaderUserInfo();
-        document.getElementById('logoutBtn').style.display = 'block';
+        document.getElementById("logoutBtn").style.display = "block";
         initializeSocketIo();
         loadPosts();
         loadFriendRequests();
         loadFriendsList();
         loadConversations();
-        showTab('postsTab', 'postsTabBtn'); // Default tab
+        showTab("postsTab", "postsTabBtn"); // Default tab
       } else {
         alert(result.message);
       }
     }
 
     async function logout() {
-      const res = await fetch('/logout', { method: 'POST' });
+      const res = await fetch("/logout", { method: "POST" });
       const result = await res.json();
       if (result.success) {
         loggedInUser = null;
         loggedInUserId = null;
-        loggedInProfilePicture = '/images/default-profile.png';
+        loggedInProfilePicture = "/images/default-profile.png";
         if (socket) {
           socket.disconnect();
           socket = null;
         }
-        document.getElementById('auth').style.display = 'flex';
-        document.getElementById('appContent').style.display = 'none';
+        document.getElementById("auth").style.display = "flex";
+        document.getElementById("appContent").style.display = "none";
         updateHeaderUserInfo();
-        document.getElementById('logoutBtn').style.display = 'none';
+        document.getElementById("logoutBtn").style.display = "none";
         // Clear all dynamic content
-        document.getElementById('posts').innerHTML = '';
-        document.getElementById('friendRequestsList').innerHTML = '';
-        document.getElementById('friendsList').innerHTML = '';
-        document.getElementById('userSearchResults').innerHTML = '';
-        document.getElementById('conversationsList').innerHTML = '';
-        document.getElementById('profilePosts').innerHTML = ''; // Clear profile posts
+        document.getElementById("posts").innerHTML = "";
+        document.getElementById("friendRequestsList").innerHTML = "";
+        document.getElementById("friendsList").innerHTML = "";
+        document.getElementById("userSearchResults").innerHTML = "";
+        document.getElementById("conversationsList").innerHTML = "";
+        document.getElementById("profilePosts").innerHTML = ""; // Clear profile posts
         currentProfileUser = null;
         closeChat(); // Close any active chat
       } else {
-        alert('Failed to log out.');
+        alert("Failed to log out.");
       }
     }
 
     async function fetchSession() {
-      const res = await fetch('/session');
+      const res = await fetch("/session");
       const data = await res.json();
       if (data.username && data.userId) {
         loggedInUser = data.username;
         loggedInUserId = data.userId;
-        loggedInProfilePicture = data.profilePicture || '/images/default-profile.png';
+        loggedInProfilePicture = data.profilePicture || "/images/default-profile.png";
 
-        document.getElementById('auth').style.display = 'none';
-        document.getElementById('appContent').style.display = 'flex';
+        document.getElementById("auth").style.display = "none";
+        document.getElementById("appContent").style.display = "flex";
         updateHeaderUserInfo();
-        document.getElementById('logoutBtn').style.display = 'block';
+        document.getElementById("logoutBtn").style.display = "block";
         initializeSocketIo();
         loadPosts();
         loadFriendRequests();
         loadFriendsList();
         loadConversations();
-        showTab('postsTab', 'postsTabBtn'); // Default tab
+        showTab("postsTab", "postsTabBtn"); // Default tab
       } else {
-        document.getElementById('auth').style.display = 'flex';
-        document.getElementById('appContent').style.display = 'none';
+        document.getElementById("auth").style.display = "flex";
+        document.getElementById("appContent").style.display = "none";
       }
     }
 
     function updateHeaderUserInfo() {
-        document.getElementById('loggedInUsername').textContent = `Logged in as: ${loggedInUser}`;
-        document.getElementById('headerProfilePic').src = loggedInProfilePicture;
+        document.getElementById("loggedInUsername").textContent = `Logged in as: ${loggedInUser}`;
+        document.getElementById("headerProfilePic").src = loggedInProfilePicture;
     }
 
     // --- Socket.IO Initialization ---
     function initializeSocketIo() {
       if (!socket && loggedInUserId) {
         socket = io(); // Connect to the Socket.IO server
-        socket.on('connect', () => {
-          console.log('Connected to Socket.IO server');
-          socket.emit('registerUser', loggedInUserId); // Register user with their ID
+        socket.on("connect", () => {
+          console.log("Connected to Socket.IO server");
+          socket.emit("registerUser", loggedInUserId); // Register user with their ID
         });
 
-        socket.on('disconnect', () => {
-          console.log('Disconnected from Socket.IO server');
+        socket.on("disconnect", () => {
+          console.log("Disconnected from Socket.IO server");
         });
 
-        socket.on('receiveMessage', (message) => {
-          console.log('Message received:', message);
+        socket.on("receiveMessage", (message) => {
+          console.log("Message received:", message);
           if (message.conversation === currentConversationId) {
             appendMessageToChat(message);
           }
@@ -473,137 +490,251 @@
           loadConversations();
         });
 
-        socket.on('conversationStarted', (data) => {
-          console.log('Conversation started event received:', data);
+        socket.on("conversationStarted", (data) => {
+          console.log("Conversation started event received:", data);
           // When a new conversation is started via socket, update the conversations list
           loadConversations();
           // Optionally, auto-open the chat if this was a new conversation initiated by this user
           // openChat(data.conversationId, data.participantNames, data.participants);
         });
 
-        socket.on('chatError', (errorMsg) => {
+        socket.on("chatError", (errorMsg) => {
           alert(`Chat error: ${errorMsg}`);
         });
       }
     }
 
     // --- Upload Progress Functions ---
-    function showUploadProgress() {
-      document.getElementById('uploadProgressContainer').style.display = 'block';
-      document.getElementById('postSubmitBtn').disabled = true;
-      document.getElementById('postSubmitBtn').textContent = 'Uploading...';
+    function showUploadProgress(showControls = false) {
+      document.getElementById("uploadProgressContainer").style.display = "block";
+      document.getElementById("postSubmitBtn").disabled = true;
+      document.getElementById("postSubmitBtn").textContent = "Uploading...";
+      document.getElementById("pauseUploadBtn").style.display = showControls ? "inline-block" : "none";
+      document.getElementById("resumeUploadBtn").style.display = "none";
+      document.getElementById("cancelUploadBtn").style.display = showControls ? "inline-block" : "none";
     }
 
     function hideUploadProgress() {
-      document.getElementById('uploadProgressContainer').style.display = 'none';
-      document.getElementById('postSubmitBtn').disabled = false;
-      document.getElementById('postSubmitBtn').textContent = 'Post';
-      document.getElementById('uploadProgressFill').style.width = '0%';
-      document.getElementById('uploadProgressText').textContent = 'Uploading... 0%';
-      document.getElementById('uploadStatus').textContent = 'Preparing upload...';
+      document.getElementById("uploadProgressContainer").style.display = "none";
+      document.getElementById("postSubmitBtn").disabled = false;
+      document.getElementById("postSubmitBtn").textContent = "Post";
+      document.getElementById("uploadProgressFill").style.width = "0%";
+      document.getElementById("uploadProgressText").textContent = "Uploading... 0%";
+      document.getElementById("uploadStatus").textContent = "Preparing upload...";
+      document.getElementById("pauseUploadBtn").style.display = "none";
+      document.getElementById("resumeUploadBtn").style.display = "none";
+      document.getElementById("cancelUploadBtn").style.display = "none";
     }
 
-    function updateUploadProgress(percentage, status = '') {
-      document.getElementById('uploadProgressFill').style.width = percentage + '%';
-      document.getElementById('uploadProgressText').textContent = `Uploading... ${Math.round(percentage)}%`;
+    function updateUploadProgress(percentage, status = "") {
+      document.getElementById("uploadProgressFill").style.width = percentage + "%";
+      document.getElementById("uploadProgressText").textContent = `Uploading... ${Math.round(percentage)}%`;
       if (status) {
-        document.getElementById('uploadStatus').textContent = status;
+        document.getElementById("uploadStatus").textContent = status;
       }
     }
 
     function showProfileUploadProgress() {
-      document.getElementById('profileUploadProgressContainer').style.display = 'block';
-      document.getElementById('profileUpdateBtn').disabled = true;
-      document.getElementById('profileUpdateBtn').textContent = 'Uploading...';
+      document.getElementById("profileUploadProgressContainer").style.display = "block";
+      document.getElementById("profileUpdateBtn").disabled = true;
+      document.getElementById("profileUpdateBtn").textContent = "Uploading...";
     }
 
     function hideProfileUploadProgress() {
-      document.getElementById('profileUploadProgressContainer').style.display = 'none';
-      document.getElementById('profileUpdateBtn').disabled = false;
-      document.getElementById('profileUpdateBtn').textContent = 'Update Profile';
-      document.getElementById('profileUploadProgressFill').style.width = '0%';
-      document.getElementById('profileUploadProgressText').textContent = 'Uploading... 0%';
+      document.getElementById("profileUploadProgressContainer").style.display = "none";
+      document.getElementById("profileUpdateBtn").disabled = false;
+      document.getElementById("profileUpdateBtn").textContent = "Update Profile";
+      document.getElementById("profileUploadProgressFill").style.width = "0%";
+      document.getElementById("profileUploadProgressText").textContent = "Uploading... 0%";
     }
 
     function updateProfileUploadProgress(percentage) {
-      document.getElementById('profileUploadProgressFill').style.width = percentage + '%';
-      document.getElementById('profileUploadProgressText').textContent = `Uploading... ${Math.round(percentage)}%`;
+      document.getElementById("profileUploadProgressFill").style.width = percentage + "%";
+      document.getElementById("profileUploadProgressText").textContent = `Uploading... ${Math.round(percentage)}%`;
     }
 
-    // --- Post Management with Progress ---
-    document.getElementById('postForm').onsubmit = async (e) => {
+    // --- Post Management with Progress and Video Upload ---
+    document.getElementById("postForm").onsubmit = async (e) => {
       e.preventDefault();
       
-      const formData = new FormData(e.target);
-      const fileInput = e.target.querySelector('input[type="file"]');
-      const hasFile = fileInput.files.length > 0;
-      
-      if (hasFile) {
-        showUploadProgress();
-        updateUploadProgress(0, 'Preparing file...');
-      }
+      const fileInput = document.getElementById("mediaFileInput");
+      const textContent = e.target.querySelector("textarea[name='text']").value;
 
-      // Create XMLHttpRequest for progress tracking
+      if (fileInput.files.length > 0) {
+        videoFile = fileInput.files[0];
+        videoUploadOffset = 0;
+        videoUploadPaused = false;
+        showUploadProgress(true); // Show controls for video upload
+        uploadVideoChunk();
+      } else {
+        // Handle text-only posts or image posts (existing logic)
+        const formData = new FormData(e.target);
+        showUploadProgress();
+        updateUploadProgress(0, "Preparing post...");
+
+        currentUploadXHR = new XMLHttpRequest();
+        currentUploadXHR.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const percentage = (event.loaded / event.total) * 100;
+            updateUploadProgress(percentage, `Uploading ${fileInput.files[0].name}...`);
+          }
+        });
+
+        currentUploadXHR.addEventListener("load", () => {
+          if (currentUploadXHR.status === 200) {
+            updateUploadProgress(100, "Upload complete!");
+            setTimeout(() => {
+              hideUploadProgress();
+              e.target.reset();
+              skip = 0; // Reset skip for main feed
+              document.getElementById("posts").innerHTML = "";
+              loadPosts();
+              if (currentProfileUser && currentProfileUser.username === loggedInUser) {
+                  openProfile(loggedInUser);
+              }
+            }, 1000);
+          } else {
+            hideUploadProgress();
+            alert(`Failed to create post: ${currentUploadXHR.responseText}`);
+          }
+        });
+
+        currentUploadXHR.addEventListener("error", () => {
+          hideUploadProgress();
+          alert("Upload failed. Please try again.");
+        });
+
+        currentUploadXHR.addEventListener("abort", () => {
+          hideUploadProgress();
+          alert("Upload cancelled.");
+        });
+
+        currentUploadXHR.open("POST", "/post");
+        currentUploadXHR.send(formData);
+      }
+    };
+
+    async function uploadVideoChunk() {
+      if (!videoFile || videoUploadPaused) return;
+
+      const chunk = videoFile.slice(videoUploadOffset, videoUploadOffset + CHUNK_SIZE);
+      const formData = new FormData();
+      formData.append("media", chunk);
+      formData.append("text", document.querySelector("textarea[name='text']").value);
+      formData.append("fileName", videoFile.name);
+      formData.append("fileType", videoFile.type);
+      formData.append("fileSize", videoFile.size);
+      formData.append("offset", videoUploadOffset);
+
       currentUploadXHR = new XMLHttpRequest();
-      
-      currentUploadXHR.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable && hasFile) {
-          const percentage = (event.loaded / event.total) * 100;
-          updateUploadProgress(percentage, `Uploading ${fileInput.files[0].name}...`);
+
+      currentUploadXHR.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) {
+          const totalLoaded = videoUploadOffset + event.loaded;
+          const percentage = (totalLoaded / videoFile.size) * 100;
+          updateUploadProgress(percentage, `Uploading chunk ${Math.ceil(videoUploadOffset / CHUNK_SIZE) + 1} of ${Math.ceil(videoFile.size / CHUNK_SIZE)}...`);
         }
       });
 
-      currentUploadXHR.addEventListener('load', () => {
+      currentUploadXHR.addEventListener("load", async () => {
         if (currentUploadXHR.status === 200) {
-          if (hasFile) {
-            updateUploadProgress(100, 'Upload complete!');
-            setTimeout(() => {
+          videoUploadOffset += chunk.size;
+          if (videoUploadOffset < videoFile.size) {
+            // Upload next chunk
+            uploadVideoChunk();
+          } else {
+            // All chunks uploaded, finalize post
+            updateUploadProgress(100, "Finalizing post...");
+            const res = await fetch("/post/finalize", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                fileName: videoFile.name,
+                fileType: videoFile.type,
+                fileSize: videoFile.size,
+                text: document.querySelector("textarea[name='text']").value
+              })
+            });
+            if (res.ok) {
+              setTimeout(() => {
+                hideUploadProgress();
+                document.getElementById("postForm").reset();
+                skip = 0;
+                document.getElementById("posts").innerHTML = "";
+                loadPosts();
+                if (currentProfileUser && currentProfileUser.username === loggedInUser) {
+                    openProfile(loggedInUser);
+                }
+              }, 1000);
+            } else {
               hideUploadProgress();
-            }, 1000);
-          }
-          e.target.reset();
-          skip = 0; // Reset skip for main feed
-          document.getElementById('posts').innerHTML = '';
-          loadPosts();
-          // If currently viewing my own profile, refresh its posts
-          if (currentProfileUser && currentProfileUser.username === loggedInUser) {
-              openProfile(loggedInUser);
+              alert(`Failed to finalize post: ${await res.text()}`);
+            }
           }
         } else {
           hideUploadProgress();
-          alert('Failed to create post. Are you logged in?');
+          alert(`Upload failed: ${currentUploadXHR.responseText}`);
         }
       });
 
-      currentUploadXHR.addEventListener('error', () => {
+      currentUploadXHR.addEventListener("error", () => {
         hideUploadProgress();
-        alert('Upload failed. Please try again.');
+        alert("Upload failed. Please try again.");
       });
 
-      currentUploadXHR.addEventListener('abort', () => {
+      currentUploadXHR.addEventListener("abort", () => {
         hideUploadProgress();
-        alert('Upload cancelled.');
+        alert("Upload cancelled.");
       });
 
-      currentUploadXHR.open('POST', '/post');
+      currentUploadXHR.open("POST", "/post/upload-chunk");
       currentUploadXHR.send(formData);
+    }
+
+    document.getElementById("pauseUploadBtn").onclick = () => {
+      if (currentUploadXHR) {
+        currentUploadXHR.abort(); // Abort current chunk upload
+      }
+      videoUploadPaused = true;
+      document.getElementById("pauseUploadBtn").style.display = "none";
+      document.getElementById("resumeUploadBtn").style.display = "inline-block";
+      updateUploadProgress((videoUploadOffset / videoFile.size) * 100, "Upload Paused");
+    };
+
+    document.getElementById("resumeUploadBtn").onclick = () => {
+      videoUploadPaused = false;
+      document.getElementById("pauseUploadBtn").style.display = "inline-block";
+      document.getElementById("resumeUploadBtn").style.display = "none";
+      updateUploadProgress((videoUploadOffset / videoFile.size) * 100, "Resuming upload...");
+      uploadVideoChunk(); // Continue from where it left off
+    };
+
+    document.getElementById("cancelUploadBtn").onclick = () => {
+      if (currentUploadXHR) {
+        currentUploadXHR.abort();
+      }
+      videoFile = null;
+      videoUploadOffset = 0;
+      videoUploadPaused = false;
+      hideUploadProgress();
+      alert("Upload cancelled.");
     };
 
     async function loadPosts() {
       const res = await fetch(`/posts?skip=${skip}`);
       const posts = await res.json();
       posts.forEach(post => {
-        const el = document.createElement('div');
-        el.className = 'post';
+        const el = document.createElement("div");
+        el.className = "post";
         el.innerHTML = `
           <div>
-            <b class="clickable-username" onclick="openProfile('${post.username}')">${post.username}</b>
-            ${post.username === loggedInUser ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}
+            <b class="clickable-username" onclick="openProfile("${post.username}")">${post.username}</b>
+            ${post.username === loggedInUser ? `<span class="actions" onclick="deletePost("${post._id}")">⋮</span>` : ""}
           </div>
           <div>${post.text}</div>
-          ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
+          ${post.mediaType && post.mediaType.startsWith("video/") ? `<video controls src="${post.media}"></video>` : (post.mediaType && post.mediaType.startsWith("image/") ? `<img src="${post.media}" />` : "")}
         `;
-        document.getElementById('posts').appendChild(el);
+        document.getElementById("posts").appendChild(el);
       });
       skip += 10;
     }
@@ -613,35 +744,35 @@
     }
 
     async function deletePost(id) {
-      if (!confirm('Delete this post?')) return;
-      const res = await fetch(`/post/${id}`, { method: 'DELETE' });
+      if (!confirm("Delete this post?")) return;
+      const res = await fetch(`/post/${id}`, { method: "DELETE" });
       if (res.ok) {
         skip = 0; // Reset skip for main feed
-        document.getElementById('posts').innerHTML = '';
+        document.getElementById("posts").innerHTML = "";
         loadPosts();
         if (currentProfileUser && currentProfileUser.username === loggedInUser) {
             openProfile(loggedInUser); // Reload my profile posts if currently viewing it
         }
       } else {
-        alert('Failed to delete post.');
+        alert("Failed to delete post.");
       }
     }
 
     // --- Tab Management ---
     function showTab(tabId, buttonId) {
-      document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-      document.querySelectorAll('.tab-buttons button').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll(".tab-content").forEach(tab => tab.classList.remove("active"));
+      document.querySelectorAll(".tab-buttons button").forEach(btn => btn.classList.remove("active"));
 
-      document.getElementById(tabId).classList.add('active');
-      document.getElementById(buttonId).classList.add('active');
+      document.getElementById(tabId).classList.add("active");
+      document.getElementById(buttonId).classList.add("active");
 
       // Adjust sidebar content visibility based on active tab
-      if (tabId === 'chatTab') {
-        document.getElementById('friendsSidebarContent').style.display = 'none';
-        document.getElementById('chatSidebarContent').style.display = 'block';
+      if (tabId === "chatTab") {
+        document.getElementById("friendsSidebarContent").style.display = "none";
+        document.getElementById("chatSidebarContent").style.display = "block";
       } else {
-        document.getElementById('friendsSidebarContent').style.display = 'block';
-        document.getElementById('chatSidebarContent').style.display = 'none';
+        document.getElementById("friendsSidebarContent").style.display = "block";
+        document.getElementById("chatSidebarContent").style.display = "none";
       }
     }
 
@@ -650,25 +781,25 @@
     function searchUsers() {
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(async () => {
-        const query = document.getElementById('userSearchInput').value;
-        const resultsDiv = document.getElementById('userSearchResults');
-        resultsDiv.innerHTML = '';
+        const query = document.getElementById("userSearchInput").value;
+        const resultsDiv = document.getElementById("userSearchResults");
+        resultsDiv.innerHTML = "";
         if (query.length < 2) return;
 
         const res = await fetch(`/users/search?query=${encodeURIComponent(query)}`);
         const users = await res.json();
 
         if (users.length === 0) {
-          resultsDiv.innerHTML = '<p>No users found.</p>';
+          resultsDiv.innerHTML = "<p>No users found.</p>";
           return;
         }
 
         users.forEach(user => {
-          const el = document.createElement('div');
-          el.className = 'user-search-result';
+          const el = document.createElement("div");
+          el.className = "user-search-result";
           el.innerHTML = `
             <span>${user.username}</span>
-            <button onclick="sendFriendRequest('${user.username}')">Add Friend</button>
+            <button onclick="sendFriendRequest("${user.username}")">Add Friend</button>
           `;
           resultsDiv.appendChild(el);
         });
@@ -676,41 +807,41 @@
     }
 
     async function sendFriendRequest(username) {
-      if (!loggedInUser) { alert('Please log in.'); return; }
-      const res = await fetch(`/friends/request/${username}`, { method: 'POST' });
+      if (!loggedInUser) { alert("Please log in."); return; }
+      const res = await fetch(`/friends/request/${username}`, { method: "POST" });
       const result = await res.json();
       alert(result.message);
       if (result.success) {
-        document.getElementById('userSearchResults').innerHTML = ''; // Clear search results
-        document.getElementById('userSearchInput').value = '';
+        document.getElementById("userSearchResults").innerHTML = ""; // Clear search results
+        document.getElementById("userSearchInput").value = "";
       }
     }
 
     async function loadFriendRequests() {
-      const res = await fetch('/friends/requests/received');
+      const res = await fetch("/friends/requests/received");
       const requests = await res.json();
-      const listDiv = document.getElementById('friendRequestsList');
-      listDiv.innerHTML = '';
+      const listDiv = document.getElementById("friendRequestsList");
+      listDiv.innerHTML = "";
 
       if (requests.length === 0) {
-        listDiv.innerHTML = '<p>No pending requests.</p>';
+        listDiv.innerHTML = "<p>No pending requests.</p>";
         return;
       }
 
       requests.forEach(req => {
-        const el = document.createElement('div');
-        el.className = 'friend-request-item';
+        const el = document.createElement("div");
+        el.className = "friend-request-item";
         el.innerHTML = `
           <span>${req.requester.username}</span>
-          <button class="friend-action-btn" onclick="acceptFriendRequest('${req.requester.username}')">Accept</button>
-          <button class="friend-action-btn decline" onclick="declineFriendRequest('${req.requester.username}')">Decline</button>
+          <button class="friend-action-btn" onclick="acceptFriendRequest("${req.requester.username}")">Accept</button>
+          <button class="friend-action-btn decline" onclick="declineFriendRequest("${req.requester.username}")">Decline</button>
         `;
         listDiv.appendChild(el);
       });
     }
 
     async function acceptFriendRequest(username) {
-      const res = await fetch(`/friends/accept/${username}`, { method: 'POST' });
+      const res = await fetch(`/friends/accept/${username}`, { method: "POST" });
       const result = await res.json();
       alert(result.message);
       if (result.success) {
@@ -720,7 +851,7 @@
     }
 
     async function declineFriendRequest(username) {
-      const res = await fetch(`/friends/decline/${username}`, { method: 'POST' });
+      const res = await fetch(`/friends/decline/${username}`, { method: "POST" });
       const result = await res.json();
       alert(result.message);
       if (result.success) {
@@ -729,22 +860,22 @@
     }
 
     async function loadFriendsList() {
-      const res = await fetch('/friends/list');
+      const res = await fetch("/friends/list");
       const friends = await res.json();
-      const listDiv = document.getElementById('friendsList');
-      listDiv.innerHTML = '';
+      const listDiv = document.getElementById("friendsList");
+      listDiv.innerHTML = "";
 
       if (friends.length === 0) {
-        listDiv.innerHTML = '<p>No friends yet.</p>';
+        listDiv.innerHTML = "<p>No friends yet.</p>";
         return;
       }
 
       friends.forEach(friend => {
-        const el = document.createElement('div');
-        el.className = 'friend-item';
+        const el = document.createElement("div");
+        el.className = "friend-item";
         el.innerHTML = `
           <span>${friend.username}</span>
-          <button onclick="startChatWithFriend('${friend._id}', '${friend.username}')">Message</button>
+          <button onclick="startChatWithFriend("${friend._id}", "${friend.username}")">Message</button>
         `;
         listDiv.appendChild(el);
       });
@@ -752,23 +883,23 @@
 
     // --- Chat System ---
     async function loadConversations() {
-      const res = await fetch('/conversations');
+      const res = await fetch("/conversations");
       const conversations = await res.json();
-      const listDiv = document.getElementById('conversationsList');
-      listDiv.innerHTML = '';
+      const listDiv = document.getElementById("conversationsList");
+      listDiv.innerHTML = "";
 
       if (conversations.length === 0) {
-        listDiv.innerHTML = '<p>No conversations.</p>';
+        listDiv.innerHTML = "<p>No conversations.</p>";
         return;
       }
 
       conversations.forEach(conv => {
-        const el = document.createElement('div');
-        el.className = 'chat-item';
+        const el = document.createElement("div");
+        el.className = "chat-item";
         el.innerHTML = `
           <div><strong>${conv.participantNames}</strong></div>
           <small>${conv.lastMessage}</small>
-          <button onclick="openChat('${conv._id}', '${conv.participantNames}', '${conv.participants.map(p => p._id).join(',')}')">Open Chat</button>
+          <button onclick="openChat("${conv._id}", "${conv.participantNames}", "${conv.participants.map(p => p._id).join(",")}")">Open Chat</button>
         `;
         listDiv.appendChild(el);
       });
@@ -776,24 +907,24 @@
 
     async function startChatWithFriend(friendId, friendUsername) {
       if (!socket || !loggedInUserId) {
-        alert('Chat system not ready. Please log in first.');
+        alert("Chat system not ready. Please log in first.");
         return;
       }
       console.log(`Attempting to start conversation with ${friendUsername} (${friendId})`);
-      socket.emit('startConversation', { recipientId: friendId, senderId: loggedInUserId });
+      socket.emit("startConversation", { recipientId: friendId, senderId: loggedInUserId });
 
-      // Listen for the 'conversationStarted' event
-      socket.once('conversationStarted', (data) => {
-        console.log('Conversation started, opening chat:', data);
-        openChat(data.conversationId, data.participantNames, data.participants.map(p => p._id).join(','));
+      // Listen for the "conversationStarted" event
+      socket.once("conversationStarted", (data) => {
+        console.log("Conversation started, opening chat:", data);
+        openChat(data.conversationId, data.participantNames, data.participants.map(p => p._id).join(","));
       });
     }
 
     async function openChat(conversationId, participantNames, participantIds) {
-      document.getElementById('noChatSelected').style.display = 'none';
-      document.getElementById('activeChatWindow').style.display = 'flex';
-      document.getElementById('chatWithUsername').textContent = `Chat with: ${participantNames}`;
-      document.getElementById('chatMessages').innerHTML = ''; // Clear previous messages
+      document.getElementById("noChatSelected").style.display = "none";
+      document.getElementById("activeChatWindow").style.display = "flex";
+      document.getElementById("chatWithUsername").textContent = `Chat with: ${participantNames}`;
+      document.getElementById("chatMessages").innerHTML = ""; // Clear previous messages
       conversationMessagesLoaded.clear(); // Reset loaded messages
       cancelReply(); // Clear any pending reply
 
@@ -806,7 +937,7 @@
       messages.forEach(msg => appendMessageToChat(msg));
 
       // Scroll to bottom
-      const chatMessagesDiv = document.getElementById('chatMessages');
+      const chatMessagesDiv = document.getElementById("chatMessages");
       chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
     }
 
@@ -817,16 +948,16 @@
       }
       conversationMessagesLoaded.add(message._id);
 
-      const chatMessagesDiv = document.getElementById('chatMessages');
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'message ' + (String(message.sender._id) === String(loggedInUserId) ? 'sent' : 'received');
+      const chatMessagesDiv = document.getElementById("chatMessages");
+      const messageDiv = document.createElement("div");
+      messageDiv.className = "message " + (String(message.sender._id) === String(loggedInUserId) ? "sent" : "received");
 
       messageDiv.innerHTML = `
         <strong>${message.sender.username}</strong>
         <span>${message.text}</span>
         <div class="message-time">
           ${new Date(message.createdAt).toLocaleTimeString()}
-          <span class="reply-btn" onclick="prepareReply('${message._id}', '${message.sender.username}', \`${message.text.replace(/`/g, '\\`')}\`)">Reply</span>
+          <span class="reply-btn" onclick="prepareReply("${message._id}", "${message.sender.username}", \`${message.text.replace(/`/g, "\\`")}\`)">Reply</span>
         </div>
       `;
       chatMessagesDiv.appendChild(messageDiv);
@@ -839,43 +970,43 @@
         senderUsername: senderUsername,
         text: messageText
       };
-      document.getElementById('replyingToText').textContent = `${senderUsername}: "${messageText.substring(0, 30)}${messageText.length > 30 ? '...' : ''}"`;
-      document.getElementById('replyingToMessage').style.display = 'flex'; // Use flex for reply-quote
-      document.getElementById('messageInput').focus();
+      document.getElementById("replyingToText").textContent = `${senderUsername}: "${messageText.substring(0, 30)}${messageText.length > 30 ? "..." : ""}"`;
+      document.getElementById("replyingToMessage").style.display = "flex"; // Use flex for reply-quote
+      document.getElementById("messageInput").focus();
     }
 
     function cancelReply() {
       replyingTo = null;
-      document.getElementById('replyingToMessage').style.display = 'none';
-      document.getElementById('replyingToText').textContent = '';
+      document.getElementById("replyingToMessage").style.display = "none";
+      document.getElementById("replyingToText").textContent = "";
     }
 
     function sendMessage() {
-      const messageInput = document.getElementById('messageInput');
+      const messageInput = document.getElementById("messageInput");
       let text = messageInput.value.trim();
 
       if (text && currentConversationId && socket && loggedInUserId) {
         if (replyingTo) {
           // Prepend the reply quote to the message text
-          text = `[Replying to ${replyingTo.senderUsername}: "${replyingTo.text.substring(0, 50)}${replyingTo.text.length > 50 ? '...' : ''}"] ${text}`;
+          text = `[Replying to ${replyingTo.senderUsername}: "${replyingTo.text.substring(0, 50)}${replyingTo.text.length > 50 ? "..." : ""}"] ${text}`;
           cancelReply(); // Clear reply state after sending
         }
 
-        socket.emit('sendMessage', {
+        socket.emit("sendMessage", {
           conversationId: currentConversationId,
           text: text,
           senderId: loggedInUserId
         });
-        messageInput.value = ''; // Clear input
+        messageInput.value = ""; // Clear input
       }
     }
 
     function closeChat() {
       currentConversationId = null;
       currentChatParticipantName = null;
-      document.getElementById('activeChatWindow').style.display = 'none';
-      document.getElementById('noChatSelected').style.display = 'block';
-      document.getElementById('chatMessages').innerHTML = ''; // Clear messages
+      document.getElementById("activeChatWindow").style.display = "none";
+      document.getElementById("noChatSelected").style.display = "block";
+      document.getElementById("chatMessages").innerHTML = ""; // Clear messages
       conversationMessagesLoaded.clear();
       cancelReply(); // Clear any pending reply when chat is closed
     }
@@ -885,18 +1016,18 @@
     // Navigates to and loads the currently logged-in user's profile
     async function showMyProfile() {
         if (!loggedInUser) {
-            alert('Please log in to view your profile.');
+            alert("Please log in to view your profile.");
             return;
         }
-        showTab('profileTab', 'profileTabBtn'); // Switch to the profile tab
-        document.getElementById('backToMyProfileBtn').style.display = 'none'; // Hide back button for own profile
-        document.getElementById('myProfileEditControls').style.display = 'flex'; // Show edit controls for own profile
+        showTab("profileTab", "profileTabBtn"); // Switch to the profile tab
+        document.getElementById("backToMyProfileBtn").style.display = "none"; // Hide back button for own profile
+        document.getElementById("myProfileEditControls").style.display = "flex"; // Show edit controls for own profile
         openProfile(loggedInUser); // Load logged-in user's profile
     }
 
     // Opens a specific user's profile (could be self or another user)
     async function openProfile(usernameToView) {
-        showTab('profileTab', 'profileTabBtn'); // Always switch to the profile tab
+        showTab("profileTab", "profileTabBtn"); // Always switch to the profile tab
 
         currentProfileUser = null; // Clear previously loaded profile data
 
@@ -904,65 +1035,65 @@
         const isMyOwnProfile = (usernameToView === loggedInUser);
 
         // Control visibility of edit controls and back button
-        document.getElementById('myProfileEditControls').style.display = isMyOwnProfile ? 'flex' : 'none';
-        document.getElementById('backToMyProfileBtn').style.display = isMyOwnProfile ? 'none' : 'block';
+        document.getElementById("myProfileEditControls").style.display = isMyOwnProfile ? "flex" : "none";
+        document.getElementById("backToMyProfileBtn").style.display = isMyOwnProfile ? "none" : "block";
 
 
-        document.getElementById('profileUsernameDisplay').textContent = 'Loading profile...';
-        document.getElementById('profilePictureDisplay').src = '/images/default-profile.png'; // Set a temporary default
-        document.getElementById('profilePostsUsername').textContent = usernameToView; // Set name for posts section
-        document.getElementById('profilePosts').innerHTML = 'Loading posts...';
+        document.getElementById("profileUsernameDisplay").textContent = "Loading profile...";
+        document.getElementById("profilePictureDisplay").src = "/images/default-profile.png"; // Set a temporary default
+        document.getElementById("profilePostsUsername").textContent = usernameToView; // Set name for posts section
+        document.getElementById("profilePosts").innerHTML = "Loading posts...";
 
         const res = await fetch(`/profile/${usernameToView}`);
         if (!res.ok) {
-            document.getElementById('profileUsernameDisplay').textContent = `Profile for "${usernameToView}" not found.`;
-            document.getElementById('profilePosts').innerHTML = '';
+            document.getElementById("profileUsernameDisplay").textContent = `Profile for "${usernameToView}" not found.`;
+            document.getElementById("profilePosts").innerHTML = "";
             currentProfileUser = null;
             return;
         }
         const data = await res.json();
         currentProfileUser = data.user; // Store the user object for the currently viewed profile
 
-        document.getElementById('profileUsernameDisplay').textContent = data.user.username;
-        document.getElementById('profilePictureDisplay').src = data.user.profilePicture || '/images/default-profile.png';
-        document.getElementById('newUsernameInput').value = data.user.username; // Pre-fill for editing (only visible for own profile)
+        document.getElementById("profileUsernameDisplay").textContent = data.user.username;
+        document.getElementById("profilePictureDisplay").src = data.user.profilePicture || "/images/default-profile.png";
+        document.getElementById("newUsernameInput").value = data.user.username; // Pre-fill for editing (only visible for own profile)
 
         // Display posts for the profile being viewed
-        document.getElementById('profilePosts').innerHTML = ''; // Clear previous posts
+        document.getElementById("profilePosts").innerHTML = ""; // Clear previous posts
         if (data.posts && data.posts.length > 0) {
             data.posts.forEach(post => {
-                const el = document.createElement('div');
-                el.className = 'post';
+                const el = document.createElement("div");
+                el.className = "post";
                 el.innerHTML = `
                     <div>
                         <b>${post.username}</b>
-                        ${String(post.username) === String(loggedInUser) ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}
+                        ${String(post.username) === String(loggedInUser) ? `<span class="actions" onclick="deletePost("${post._id}")">⋮</span>` : ""}
                     </div>
                     <div>${post.text}</div>
-                    ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
+                    ${post.mediaType && post.mediaType.startsWith("video/") ? `<video controls src="${post.media}"></video>` : (post.mediaType && post.mediaType.startsWith("image/") ? `<img src="${post.media}" />` : "")}
                 `;
-                document.getElementById('profilePosts').appendChild(el);
+                document.getElementById("profilePosts").appendChild(el);
             });
         } else {
-            document.getElementById('profilePosts').innerHTML = '<p>No posts yet.</p>';
+            document.getElementById("profilePosts").innerHTML = "<p>No posts yet.</p>";
         }
     }
 
     async function updateProfile() {
-        const newUsername = document.getElementById('newUsernameInput').value.trim();
-        const profilePicFile = document.getElementById('profilePicInput').files[0];
+        const newUsername = document.getElementById("newUsernameInput").value.trim();
+        const profilePicFile = document.getElementById("profilePicInput").files[0];
 
         if (!newUsername && !profilePicFile) {
-            alert('Please provide a new username or select a profile picture.');
+            alert("Please provide a new username or select a profile picture.");
             return;
         }
 
         const formData = new FormData();
         if (newUsername) {
-            formData.append('username', newUsername);
+            formData.append("username", newUsername);
         }
         if (profilePicFile) {
-            formData.append('profilePicture', profilePicFile);
+            formData.append("profilePicture", profilePicFile);
             showProfileUploadProgress();
             updateProfileUploadProgress(0);
         }
@@ -971,7 +1102,7 @@
         currentProfileUploadXHR = new XMLHttpRequest();
         
         if (profilePicFile) {
-          currentProfileUploadXHR.upload.addEventListener('progress', (event) => {
+          currentProfileUploadXHR.upload.addEventListener("progress", (event) => {
             if (event.lengthComputable) {
               const percentage = (event.loaded / event.total) * 100;
               updateProfileUploadProgress(percentage);
@@ -979,7 +1110,7 @@
           });
         }
 
-        currentProfileUploadXHR.addEventListener('load', () => {
+        currentProfileUploadXHR.addEventListener("load", () => {
           if (currentProfileUploadXHR.status === 200) {
             const result = JSON.parse(currentProfileUploadXHR.responseText);
             if (result.success) {
@@ -992,7 +1123,7 @@
               alert(result.message);
               // Update client-side session data and UI
               loggedInUser = result.updatedUser.username;
-              loggedInProfilePicture = result.updatedUser.profilePicture || '/images/default-profile.png';
+              loggedInProfilePicture = result.updatedUser.profilePicture || "/images/default-profile.png";
               updateHeaderUserInfo();
               openProfile(loggedInUser); // Reload my profile to reflect changes
             } else {
@@ -1001,26 +1132,26 @@
             }
           } else {
             hideProfileUploadProgress();
-            alert('Failed to update profile. Please try again.');
+            alert("Failed to update profile. Please try again.");
           }
         });
 
-        currentProfileUploadXHR.addEventListener('error', () => {
+        currentProfileUploadXHR.addEventListener("error", () => {
           hideProfileUploadProgress();
-          alert('Profile update failed. Please try again.');
+          alert("Profile update failed. Please try again.");
         });
 
-        currentProfileUploadXHR.addEventListener('abort', () => {
+        currentProfileUploadXHR.addEventListener("abort", () => {
           hideProfileUploadProgress();
-          alert('Profile update cancelled.');
+          alert("Profile update cancelled.");
         });
 
-        currentProfileUploadXHR.open('POST', '/profile/update');
+        currentProfileUploadXHR.open("POST", "/profile/update");
         currentProfileUploadXHR.send(formData);
     }
 
     // --- Initial Load ---
-    document.addEventListener('DOMContentLoaded', fetchSession);
+    document.addEventListener("DOMContentLoaded", fetchSession);
   </script>
 </body>
 </html>
