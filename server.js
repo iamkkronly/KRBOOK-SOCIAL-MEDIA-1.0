@@ -87,64 +87,39 @@ const MessageSchema = new mongoose.Schema({
 
 async function connectDatabases() {
   for (let i = 0; i < DB_URIS.length; i++) {
-    try {
-      const conn = await mongoose.createConnection(DB_URIS[i], { 
-        useNewUrlParser: true, 
-        useUnifiedTopology: true,
-        serverSelectionTimeoutMS: 5000,
-        socketTimeoutMS: 45000,
-      });
-      connections[i] = conn;
-      models[i] = {
-        User: conn.model('User', UserSchema),
-        Post: conn.model('Post', PostSchema),
-        VideoUpload: conn.model('VideoUpload', VideoUploadSchema),
-        Friendship: conn.model('Friendship', FriendshipSchema),
-        Conversation: conn.model('Conversation', ConversationSchema),
-        Message: conn.model('Message', MessageSchema)
-      };
-      console.log(`Connected to DB ${i + 1}`);
-    } catch (error) {
-      console.error(`Failed to connect to DB ${i + 1}:`, error);
-    }
+    const conn = await mongoose.createConnection(DB_URIS[i], { useNewUrlParser: true, useUnifiedTopology: true });
+    connections[i] = conn;
+    models[i] = {
+      User: conn.model('User', UserSchema),
+      Post: conn.model('Post', PostSchema),
+      VideoUpload: conn.model('VideoUpload', VideoUploadSchema),
+      Friendship: conn.model('Friendship', FriendshipSchema),
+      Conversation: conn.model('Conversation', ConversationSchema),
+      Message: conn.model('Message', MessageSchema)
+    };
+    console.log(`Connected to DB ${i + 1}`);
   }
 }
 
 // Modified getActiveDB to check database size and rotate when needed
 async function getActiveDB() {
-  try {
-    const model = models[currentDB];
-    if (!model) {
-      console.error(`No model available for database ${currentDB}`);
-      return models[0]; // Fallback to first database
-    }
-    
-    const count = await model.Post.estimatedDocumentCount();
-    
-    // Check if current database has too many posts (you can adjust this threshold)
-    if (count >= 5000 && currentDB + 1 < DB_URIS.length) {
-      console.log(`Database ${currentDB + 1} is getting full (${count} posts). Switching to database ${currentDB + 2}`);
-      currentDB++;
-    }
-    
-    return models[currentDB];
-  } catch (error) {
-    console.error('Error in getActiveDB:', error);
-    return models[0]; // Fallback to first database
+  const model = models[currentDB];
+  const count = await model.Post.estimatedDocumentCount();
+  
+  // Check if current database has too many posts (you can adjust this threshold)
+  if (count >= 5000 && currentDB + 1 < DB_URIS.length) {
+    console.log(`Database ${currentDB + 1} is getting full (${count} posts). Switching to database ${currentDB + 2}`);
+    currentDB++;
   }
+  
+  return models[currentDB];
 }
 
 async function fetchAllPosts(skip = 0, limit = 10) {
   let all = [];
   for (let i = 0; i < DB_URIS.length; i++) {
-    try {
-      if (models[i] && models[i].Post) {
-        const dbPosts = await models[i].Post.find().sort({ createdAt: -1 }).skip(skip).limit(limit);
-        all = all.concat(dbPosts);
-      }
-    } catch (error) {
-      console.error(`Error fetching posts from DB ${i + 1}:`, error);
-    }
+    const dbPosts = await models[i].Post.find().sort({ createdAt: -1 }).skip(skip).limit(limit);
+    all = all.concat(dbPosts);
   }
   all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return all.slice(0, limit);
@@ -153,14 +128,8 @@ async function fetchAllPosts(skip = 0, limit = 10) {
 async function fetchUserPosts(username, skip = 0, limit = 10) {
   let userPosts = [];
   for (let i = 0; i < DB_URIS.length; i++) {
-    try {
-      if (models[i] && models[i].Post) {
-        const dbPosts = await models[i].Post.find({ username: username }).sort({ createdAt: -1 }).skip(skip).limit(limit);
-        userPosts = userPosts.concat(dbPosts);
-      }
-    } catch (error) {
-      console.error(`Error fetching user posts from DB ${i + 1}:`, error);
-    }
+    const dbPosts = await models[i].Post.find({ username: username }).sort({ createdAt: -1 }).skip(skip).limit(limit);
+    userPosts = userPosts.concat(dbPosts);
   }
   userPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return userPosts.slice(0, limit);
@@ -174,8 +143,7 @@ function bufferToDataURL(buffer, mimeType) {
 
 // === Express Middleware ===
 app.use(express.static('public'));
-app.use(express.json({ limit: '50mb' })); // Increase JSON limit for large base64 data
-app.use(express.urlencoded({ limit: '50mb', extended: true })); // Increase URL encoded limit
+app.use(express.json());
 app.use(session({
   secret: 'krbook-secret',
   resave: false,
@@ -199,8 +167,7 @@ const isAuthenticated = (req, res, next) => {
 const upload = multer({
   storage: multer.memoryStorage(), // Store in memory instead of disk
   limits: { 
-    fileSize: 10 * 1024 * 1024, // 10MB limit as requested
-    fieldSize: 10 * 1024 * 1024 // Increase field size limit
+    fileSize: 10 * 1024 * 1024 // 10MB limit as requested
   },
   fileFilter: (req, file, cb) => {
     // Accept images and videos
@@ -214,86 +181,72 @@ const upload = multer({
 
 // === Authentication Routes ===
 app.post('/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    
-    // Search for user across all databases
-    let user = null;
-    let userDB = null;
-    
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].User) {
-        const foundUser = await models[i].User.findOne({ username });
-        if (foundUser) {
-          user = foundUser;
-          userDB = i;
-          break;
-        }
-      }
+  const { username, password } = req.body;
+  
+  // Search for user across all databases
+  let user = null;
+  let userDB = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const foundUser = await models[i].User.findOne({ username });
+    if (foundUser) {
+      user = foundUser;
+      userDB = i;
+      break;
     }
-    
-    if (!user) {
-      // Create new user in the current active database
-      const { User } = await getActiveDB();
-      user = new User({ username, password });
-      await user.save();
-    } else if (user.password !== password) {
-      return res.json({ success: false, message: 'Wrong password' });
-    }
-    
-    req.session.user = username;
-    req.session.userId = user._id;
-    
-    // Handle profile picture - if it's stored as base64, use it; otherwise use default
-    let profilePicture = '/images/default-profile.png';
-    if (user.profilePictureData && user.profilePictureType) {
-      profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
-    } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
-      profilePicture = user.profilePicture;
-    }
-    
-    req.session.profilePicture = profilePicture;
-    res.json({ success: true, username: username, userId: user._id, profilePicture: profilePicture });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ success: false, message: 'Login failed' });
   }
+  
+  if (!user) {
+    // Create new user in the current active database
+    const { User } = await getActiveDB();
+    user = new User({ username, password });
+    await user.save();
+  } else if (user.password !== password) {
+    return res.json({ success: false, message: 'Wrong password' });
+  }
+  
+  req.session.user = username;
+  req.session.userId = user._id;
+  
+  // Handle profile picture - if it's stored as base64, use it; otherwise use default
+  let profilePicture = '/images/default-profile.png';
+  if (user.profilePictureData && user.profilePictureType) {
+    profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
+  } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
+    profilePicture = user.profilePicture;
+  }
+  
+  req.session.profilePicture = profilePicture;
+  res.json({ success: true, username: username, userId: user._id, profilePicture: profilePicture });
 });
 
 app.get('/session', async (req, res) => {
-  try {
-    if (req.session.userId) {
-      // Search for user across all databases
-      let user = null;
-      for (let i = 0; i < DB_URIS.length; i++) {
-        if (models[i] && models[i].User) {
-          const foundUser = await models[i].User.findById(req.session.userId).select('username profilePicture profilePictureData profilePictureType');
-          if (foundUser) {
-            user = foundUser;
-            break;
-          }
-        }
-      }
-      
-      if (user) {
-        req.session.user = user.username;
-        
-        let profilePicture = '/images/default-profile.png';
-        if (user.profilePictureData && user.profilePictureType) {
-          profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
-        } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
-          profilePicture = user.profilePicture;
-        }
-        
-        req.session.profilePicture = profilePicture;
-        return res.json({ username: user.username, userId: user._id, profilePicture: profilePicture });
+  if (req.session.userId) {
+    // Search for user across all databases
+    let user = null;
+    for (let i = 0; i < DB_URIS.length; i++) {
+      const foundUser = await models[i].User.findById(req.session.userId).select('username profilePicture profilePictureData profilePictureType');
+      if (foundUser) {
+        user = foundUser;
+        break;
       }
     }
-    res.json({ username: null, userId: null, profilePicture: null });
-  } catch (error) {
-    console.error('Session error:', error);
-    res.json({ username: null, userId: null, profilePicture: null });
+    
+    if (user) {
+      req.session.user = user.username;
+      
+      let profilePicture = '/images/default-profile.png';
+      if (user.profilePictureData && user.profilePictureType) {
+        profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
+      } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
+        profilePicture = user.profilePicture;
+      }
+      
+      req.session.profilePicture = profilePicture;
+      return res.json({ username: user.username, userId: user._id, profilePicture: profilePicture });
+    }
   }
+  res.json({ username: null, userId: null, profilePicture: null });
 });
 
 app.post('/logout', (req, res) => {
@@ -330,37 +283,50 @@ app.post('/post', isAuthenticated, upload.single('media'), async (req, res) => {
     
     await post.save();
     console.log(`Post saved to database ${currentDB + 1}`);
-    res.json({ success: true, message: 'Post created successfully' });
+    res.end();
   } catch (error) {
     console.error('Error creating post:', error);
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({ message: 'File size exceeds 10MB limit' });
     }
-    res.status(500).json({ message: 'Failed to create post', error: error.message });
+    res.status(500).json({ message: 'Failed to create post' });
   }
 });
 
-// New route for chunked video upload
+// FIXED: New route for chunked video upload with proper error handling
 app.post('/post/upload-chunk', isAuthenticated, upload.single('media'), async (req, res) => {
   try {
-    console.log('Received chunk upload request');
-    console.log('Request body:', req.body);
-    console.log('File info:', req.file ? { size: req.file.size, mimetype: req.file.mimetype } : 'No file');
+    // Log the incoming request for debugging
+    console.log('Chunk upload request received');
+    console.log('Body:', req.body);
+    console.log('File:', req.file ? { size: req.file.size, mimetype: req.file.mimetype } : 'No file');
     
-    const { fileName, fileType, fileSize, offset } = req.body;
+    const { fileName, fileType, fileSize, offset, text } = req.body;
     
-    // Validate required fields
-    if (!fileName || !fileType || !fileSize || offset === undefined) {
-      console.error('Missing required fields:', { fileName, fileType, fileSize, offset });
-      return res.status(400).json({ message: 'Missing required fields: fileName, fileType, fileSize, offset' });
+    // Validate all required fields
+    if (!fileName) {
+      console.error('Missing fileName');
+      return res.status(400).json({ message: 'Missing fileName' });
+    }
+    if (!fileType) {
+      console.error('Missing fileType');
+      return res.status(400).json({ message: 'Missing fileType' });
+    }
+    if (!fileSize) {
+      console.error('Missing fileSize');
+      return res.status(400).json({ message: 'Missing fileSize' });
+    }
+    if (offset === undefined || offset === null) {
+      console.error('Missing offset');
+      return res.status(400).json({ message: 'Missing offset' });
+    }
+    if (!req.file) {
+      console.error('No file uploaded');
+      return res.status(400).json({ message: 'No file uploaded' });
     }
     
-    const chunkData = req.file ? req.file.buffer.toString('base64') : null;
-    
-    if (!chunkData) {
-      console.error('No chunk data received');
-      return res.status(400).json({ message: 'No chunk data received' });
-    }
+    const chunkData = req.file.buffer.toString('base64');
+    console.log(`Processing chunk: offset=${offset}, size=${req.file.size}, fileName=${fileName}`);
     
     const { VideoUpload } = await getActiveDB();
     
@@ -372,7 +338,7 @@ app.post('/post/upload-chunk', isAuthenticated, upload.single('media'), async (r
     });
     
     if (!videoUpload) {
-      console.log('Creating new video upload record');
+      console.log('Creating new VideoUpload record');
       videoUpload = new VideoUpload({
         username: req.session.user,
         fileName: fileName,
@@ -399,7 +365,7 @@ app.post('/post/upload-chunk', isAuthenticated, upload.single('media'), async (r
     }
     
     await videoUpload.save();
-    console.log(`Chunk saved. Progress: ${videoUpload.uploadedSize}/${fileSize}`);
+    console.log(`Chunk saved successfully. Progress: ${videoUpload.uploadedSize}/${fileSize}`);
     
     res.json({ 
       success: true, 
@@ -408,23 +374,31 @@ app.post('/post/upload-chunk', isAuthenticated, upload.single('media'), async (r
     });
     
   } catch (error) {
-    console.error('Error uploading chunk:', error);
-    res.status(500).json({ message: 'Failed to upload chunk', error: error.message });
+    console.error('Error in upload-chunk:', error);
+    res.status(500).json({ message: 'Internal server error during chunk upload', error: error.message });
   }
 });
 
-// New route to finalize video upload and create post
+// FIXED: New route to finalize video upload and create post with proper error handling
 app.post('/post/finalize', isAuthenticated, async (req, res) => {
   try {
-    console.log('Finalizing video upload');
-    console.log('Request body:', req.body);
+    console.log('Finalize request received');
+    console.log('Body:', req.body);
     
     const { fileName, fileType, fileSize, text } = req.body;
     
     // Validate required fields
-    if (!fileName || !fileType || !fileSize) {
-      console.error('Missing required fields for finalization:', { fileName, fileType, fileSize });
-      return res.status(400).json({ message: 'Missing required fields: fileName, fileType, fileSize' });
+    if (!fileName) {
+      console.error('Missing fileName in finalize');
+      return res.status(400).json({ message: 'Missing fileName' });
+    }
+    if (!fileType) {
+      console.error('Missing fileType in finalize');
+      return res.status(400).json({ message: 'Missing fileType' });
+    }
+    if (!fileSize) {
+      console.error('Missing fileSize in finalize');
+      return res.status(400).json({ message: 'Missing fileSize' });
     }
     
     const { VideoUpload, Post } = await getActiveDB();
@@ -437,11 +411,11 @@ app.post('/post/finalize', isAuthenticated, async (req, res) => {
     });
     
     if (!videoUpload) {
-      console.error('Video upload not found or not complete');
+      console.error('VideoUpload not found or not complete');
       return res.status(404).json({ message: 'Video upload not found or not complete' });
     }
     
-    console.log(`Found video upload with ${videoUpload.chunks.length} chunks`);
+    console.log(`Found VideoUpload with ${videoUpload.chunks.length} chunks`);
     
     // Sort chunks by offset and combine them
     videoUpload.chunks.sort((a, b) => a.offset - b.offset);
@@ -460,49 +434,37 @@ app.post('/post/finalize', isAuthenticated, async (req, res) => {
     });
     
     await post.save();
-    console.log(`Video post created for user ${req.session.user}`);
+    console.log(`Video post created successfully for user ${req.session.user}`);
     
     // Clean up the video upload record
     await VideoUpload.deleteOne({ _id: videoUpload._id });
-    console.log('Cleaned up video upload record');
+    console.log('VideoUpload record cleaned up');
     
-    res.json({ success: true, message: 'Video post created successfully' });
+    res.json({ success: true });
     
   } catch (error) {
-    console.error('Error finalizing video upload:', error);
-    res.status(500).json({ message: 'Failed to finalize video upload', error: error.message });
+    console.error('Error in finalize:', error);
+    res.status(500).json({ message: 'Internal server error during finalization', error: error.message });
   }
 });
 
 app.get('/posts', async (req, res) => {
-  try {
-    const skip = parseInt(req.query.skip) || 0;
-    const posts = await fetchAllPosts(skip, 10);
-    res.json(posts);
-  } catch (error) {
-    console.error('Error fetching posts:', error);
-    res.status(500).json({ message: 'Failed to fetch posts' });
-  }
+  const skip = parseInt(req.query.skip) || 0;
+  const posts = await fetchAllPosts(skip, 10);
+  res.json(posts);
 });
 
 app.delete('/post/:id', isAuthenticated, async (req, res) => {
-  try {
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Post) {
-        const { Post } = models[i];
-        const post = await Post.findById(req.params.id);
-        if (post && String(post.username) === String(req.session.user)) {
-          await Post.deleteOne({ _id: req.params.id });
-          console.log(`Post ${req.params.id} deleted from database ${i + 1}`);
-          return res.json({ success: true });
-        }
-      }
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const { Post } = models[i];
+    const post = await Post.findById(req.params.id);
+    if (post && String(post.username) === String(req.session.user)) {
+      await Post.deleteOne({ _id: req.params.id });
+      console.log(`Post ${req.params.id} deleted from database ${i + 1}`);
+      return res.end();
     }
-    res.status(403).json({ message: 'Post not found or unauthorized' });
-  } catch (error) {
-    console.error('Error deleting post:', error);
-    res.status(500).json({ message: 'Failed to delete post' });
   }
+  res.status(403).end();
 });
 
 // Serve default profile images (keep this for default images)
@@ -510,48 +472,41 @@ app.use('/images', express.static(path.join(__dirname, 'public', 'images')));
 
 // === Profile Routes ===
 app.get('/profile/:username', async (req, res) => {
-  try {
-    const targetUsername = req.params.username;
-    
-    // Search for user across all databases
-    let userProfile = null;
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].User) {
-        const foundUser = await models[i].User.findOne({ username: targetUsername }).select('username profilePicture profilePictureData profilePictureType _id');
-        if (foundUser) {
-          userProfile = foundUser;
-          break;
-        }
-      }
+  const targetUsername = req.params.username;
+  
+  // Search for user across all databases
+  let userProfile = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const foundUser = await models[i].User.findOne({ username: targetUsername }).select('username profilePicture profilePictureData profilePictureType _id');
+    if (foundUser) {
+      userProfile = foundUser;
+      break;
     }
-
-    if (!userProfile) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Fetch posts by this user from all databases
-    const userPosts = await fetchUserPosts(targetUsername, 0, 20);
-
-    // Handle profile picture
-    let profilePicture = '/images/default-profile.png';
-    if (userProfile.profilePictureData && userProfile.profilePictureType) {
-      profilePicture = `data:${userProfile.profilePictureType};base64,${userProfile.profilePictureData}`;
-    } else if (userProfile.profilePicture && userProfile.profilePicture !== '/images/default-profile.png') {
-      profilePicture = userProfile.profilePicture;
-    }
-
-    res.json({
-      user: {
-        _id: userProfile._id,
-        username: userProfile.username,
-        profilePicture: profilePicture
-      },
-      posts: userPosts
-    });
-  } catch (error) {
-    console.error('Error fetching profile:', error);
-    res.status(500).json({ message: 'Failed to fetch profile' });
   }
+
+  if (!userProfile) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  // Fetch posts by this user from all databases
+  const userPosts = await fetchUserPosts(targetUsername, 0, 20);
+
+  // Handle profile picture
+  let profilePicture = '/images/default-profile.png';
+  if (userProfile.profilePictureData && userProfile.profilePictureType) {
+    profilePicture = `data:${userProfile.profilePictureType};base64,${userProfile.profilePictureData}`;
+  } else if (userProfile.profilePicture && userProfile.profilePicture !== '/images/default-profile.png') {
+    profilePicture = userProfile.profilePicture;
+  }
+
+  res.json({
+    user: {
+      _id: userProfile._id,
+      username: userProfile.username,
+      profilePicture: profilePicture
+    },
+    posts: userPosts
+  });
 });
 
 app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), async (req, res) => {
@@ -561,13 +516,11 @@ app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), as
     let userDB = null;
     
     for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].User) {
-        const foundUser = await models[i].User.findById(req.session.userId);
-        if (foundUser) {
-          user = foundUser;
-          userDB = i;
-          break;
-        }
+      const foundUser = await models[i].User.findById(req.session.userId);
+      if (foundUser) {
+        user = foundUser;
+        userDB = i;
+        break;
       }
     }
 
@@ -580,12 +533,10 @@ app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), as
       // Check for unique username across all databases
       let existingUser = null;
       for (let i = 0; i < DB_URIS.length; i++) {
-        if (models[i] && models[i].User) {
-          const foundUser = await models[i].User.findOne({ username: req.body.username });
-          if (foundUser && String(foundUser._id) !== String(user._id)) {
-            existingUser = foundUser;
-            break;
-          }
+        const foundUser = await models[i].User.findOne({ username: req.body.username });
+        if (foundUser && String(foundUser._id) !== String(user._id)) {
+          existingUser = foundUser;
+          break;
         }
       }
       
@@ -634,292 +585,230 @@ app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), as
 
 // === Friend System Routes ===
 app.get('/users/search', isAuthenticated, async (req, res) => {
-  try {
-    const { query } = req.query;
-    if (!query) return res.json([]);
-    
-    let users = [];
-    // Search across all databases
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].User) {
-        const dbUsers = await models[i].User.find({
-          username: { $regex: '^' + query, $options: 'i' },
-          _id: { $ne: req.session.userId }
-        }).select('username');
-        users = users.concat(dbUsers);
-      }
-    }
-    
-    res.json(users);
-  } catch (error) {
-    console.error('Error searching users:', error);
-    res.status(500).json({ message: 'Failed to search users' });
+  const { query } = req.query;
+  if (!query) return res.json([]);
+  
+  let users = [];
+  // Search across all databases
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbUsers = await models[i].User.find({
+      username: { $regex: '^' + query, $options: 'i' },
+      _id: { $ne: req.session.userId }
+    }).select('username');
+    users = users.concat(dbUsers);
   }
+  
+  res.json(users);
 });
 
 app.post('/friends/request/:recipientUsername', isAuthenticated, async (req, res) => {
-  try {
-    const { recipientUsername } = req.params;
-    
-    // Find requester and recipient across all databases
-    let requester = null;
-    let recipient = null;
-    
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].User) {
-        if (!requester) {
-          requester = await models[i].User.findById(req.session.userId);
-        }
-        if (!recipient) {
-          recipient = await models[i].User.findOne({ username: recipientUsername });
-        }
-        if (requester && recipient) break;
-      }
+  const { recipientUsername } = req.params;
+  
+  // Find requester and recipient across all databases
+  let requester = null;
+  let recipient = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    if (!requester) {
+      requester = await models[i].User.findById(req.session.userId);
     }
-
-    if (!requester || !recipient) {
-      return res.status(404).json({ message: 'User not found' });
+    if (!recipient) {
+      recipient = await models[i].User.findOne({ username: recipientUsername });
     }
-    if (requester._id.equals(recipient._id)) {
-      return res.status(400).json({ message: 'Cannot send friend request to yourself' });
-    }
-
-    // Check if a request already exists across all databases
-    let existingFriendship = null;
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Friendship) {
-        existingFriendship = await models[i].Friendship.findOne({
-          $or: [
-            { requester: requester._id, recipient: recipient._id },
-            { requester: recipient._id, recipient: requester._id }
-          ]
-        });
-        if (existingFriendship) break;
-      }
-    }
-
-    if (existingFriendship) {
-      return res.status(409).json({ message: 'Friend request already sent or users are already friends' });
-    }
-
-    const { Friendship } = await getActiveDB();
-    const newFriendship = new Friendship({
-      requester: requester._id,
-      recipient: recipient._id,
-      status: 'pending'
-    });
-    await newFriendship.save();
-    res.json({ success: true, message: 'Friend request sent' });
-  } catch (error) {
-    console.error('Error sending friend request:', error);
-    res.status(500).json({ message: 'Failed to send friend request' });
+    if (requester && recipient) break;
   }
+
+  if (!requester || !recipient) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+  if (requester._id.equals(recipient._id)) {
+    return res.status(400).json({ message: 'Cannot send friend request to yourself' });
+  }
+
+  // Check if a request already exists across all databases
+  let existingFriendship = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    existingFriendship = await models[i].Friendship.findOne({
+      $or: [
+        { requester: requester._id, recipient: recipient._id },
+        { requester: recipient._id, recipient: requester._id }
+      ]
+    });
+    if (existingFriendship) break;
+  }
+
+  if (existingFriendship) {
+    return res.status(409).json({ message: 'Friend request already sent or users are already friends' });
+  }
+
+  const { Friendship } = await getActiveDB();
+  const newFriendship = new Friendship({
+    requester: requester._id,
+    recipient: recipient._id,
+    status: 'pending'
+  });
+  await newFriendship.save();
+  res.json({ success: true, message: 'Friend request sent' });
 });
 
 app.post('/friends/accept/:requesterUsername', isAuthenticated, async (req, res) => {
-  try {
-    const { requesterUsername } = req.params;
-    
-    // Find users across all databases
-    let recipient = null;
-    let requester = null;
-    
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].User) {
-        if (!recipient) {
-          recipient = await models[i].User.findById(req.session.userId);
-        }
-        if (!requester) {
-          requester = await models[i].User.findOne({ username: requesterUsername });
-        }
-        if (recipient && requester) break;
-      }
+  const { requesterUsername } = req.params;
+  
+  // Find users across all databases
+  let recipient = null;
+  let requester = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    if (!recipient) {
+      recipient = await models[i].User.findById(req.session.userId);
     }
-
-    if (!requester || !recipient) {
-      return res.status(404).json({ message: 'User not found' });
+    if (!requester) {
+      requester = await models[i].User.findOne({ username: requesterUsername });
     }
-
-    // Find and update friendship across all databases
-    let friendship = null;
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Friendship) {
-        friendship = await models[i].Friendship.findOneAndUpdate(
-          { requester: requester._id, recipient: recipient._id, status: 'pending' },
-          { status: 'accepted' },
-          { new: true }
-        );
-        if (friendship) break;
-      }
-    }
-
-    if (!friendship) {
-      return res.status(404).json({ message: 'Pending friend request not found' });
-    }
-
-    res.json({ success: true, message: 'Friend request accepted' });
-  } catch (error) {
-    console.error('Error accepting friend request:', error);
-    res.status(500).json({ message: 'Failed to accept friend request' });
+    if (recipient && requester) break;
   }
+
+  if (!requester || !recipient) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  // Find and update friendship across all databases
+  let friendship = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    friendship = await models[i].Friendship.findOneAndUpdate(
+      { requester: requester._id, recipient: recipient._id, status: 'pending' },
+      { status: 'accepted' },
+      { new: true }
+    );
+    if (friendship) break;
+  }
+
+  if (!friendship) {
+    return res.status(404).json({ message: 'Pending friend request not found' });
+  }
+
+  res.json({ success: true, message: 'Friend request accepted' });
 });
 
 app.post('/friends/decline/:requesterUsername', isAuthenticated, async (req, res) => {
-  try {
-    const { requesterUsername } = req.params;
-    
-    // Find users across all databases
-    let recipient = null;
-    let requester = null;
-    
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].User) {
-        if (!recipient) {
-          recipient = await models[i].User.findById(req.session.userId);
-        }
-        if (!requester) {
-          requester = await models[i].User.findOne({ username: requesterUsername });
-        }
-        if (recipient && requester) break;
-      }
+  const { requesterUsername } = req.params;
+  
+  // Find users across all databases
+  let recipient = null;
+  let requester = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    if (!recipient) {
+      recipient = await models[i].User.findById(req.session.userId);
     }
-
-    if (!requester || !recipient) {
-      return res.status(404).json({ message: 'User not found' });
+    if (!requester) {
+      requester = await models[i].User.findOne({ username: requesterUsername });
     }
-
-    // Find and delete friendship across all databases
-    let friendship = null;
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Friendship) {
-        friendship = await models[i].Friendship.findOneAndDelete(
-          { requester: requester._id, recipient: recipient._id, status: 'pending' }
-        );
-        if (friendship) break;
-      }
-    }
-
-    if (!friendship) {
-      return res.status(404).json({ message: 'Pending friend request not found' });
-    }
-
-    res.json({ success: true, message: 'Friend request declined' });
-  } catch (error) {
-    console.error('Error declining friend request:', error);
-    res.status(500).json({ message: 'Failed to decline friend request' });
+    if (recipient && requester) break;
   }
+
+  if (!requester || !recipient) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  // Find and delete friendship across all databases
+  let friendship = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    friendship = await models[i].Friendship.findOneAndDelete(
+      { requester: requester._id, recipient: recipient._id, status: 'pending' }
+    );
+    if (friendship) break;
+  }
+
+  if (!friendship) {
+    return res.status(404).json({ message: 'Pending friend request not found' });
+  }
+
+  res.json({ success: true, message: 'Friend request declined' });
 });
 
 app.get('/friends/requests/received', isAuthenticated, async (req, res) => {
-  try {
-    let requests = [];
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Friendship) {
-        const dbRequests = await models[i].Friendship.find({
-          recipient: req.session.userId,
-          status: 'pending'
-        }).populate('requester', 'username');
-        requests = requests.concat(dbRequests);
-      }
-    }
-    res.json(requests);
-  } catch (error) {
-    console.error('Error fetching friend requests:', error);
-    res.status(500).json({ message: 'Failed to fetch friend requests' });
+  let requests = [];
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbRequests = await models[i].Friendship.find({
+      recipient: req.session.userId,
+      status: 'pending'
+    }).populate('requester', 'username');
+    requests = requests.concat(dbRequests);
   }
+  res.json(requests);
 });
 
 app.get('/friends/list', isAuthenticated, async (req, res) => {
-  try {
-    let friends = [];
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Friendship) {
-        const dbFriends = await models[i].Friendship.find({
-          $or: [
-            { requester: req.session.userId, status: 'accepted' },
-            { recipient: req.session.userId, status: 'accepted' }
-          ]
-        }).populate('requester recipient', 'username');
-        friends = friends.concat(dbFriends);
-      }
-    }
-    
-    res.json(friends.map(f => {
-      if (String(f.requester._id) === String(req.session.userId)) {
-        return { _id: f.recipient._id, username: f.recipient.username };
-      } else {
-        return { _id: f.requester._id, username: f.requester.username };
-      }
-    }));
-  } catch (error) {
-    console.error('Error fetching friends list:', error);
-    res.status(500).json({ message: 'Failed to fetch friends list' });
+  let friends = [];
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbFriends = await models[i].Friendship.find({
+      $or: [
+        { requester: req.session.userId, status: 'accepted' },
+        { recipient: req.session.userId, status: 'accepted' }
+      ]
+    }).populate('requester recipient', 'username');
+    friends = friends.concat(dbFriends);
   }
+  
+  res.json(friends.map(f => {
+    if (String(f.requester._id) === String(req.session.userId)) {
+      return { _id: f.recipient._id, username: f.recipient.username };
+    } else {
+      return { _id: f.requester._id, username: f.requester.username };
+    }
+  }));
 });
 
 // === Chat System Routes ===
 app.get('/conversations', isAuthenticated, async (req, res) => {
-  try {
-    let conversations = [];
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Conversation) {
-        const dbConversations = await models[i].Conversation.find({
-          participants: req.session.userId
-        })
-          .populate('participants', 'username')
-          .populate('lastMessage')
-          .sort({ updatedAt: -1 });
-        conversations = conversations.concat(dbConversations);
-      }
-    }
-
-    res.json(conversations.map(conv => {
-      const otherParticipants = conv.participants.filter(p => String(p._id) !== String(req.session.userId));
-      return {
-        _id: conv._id,
-        participants: conv.participants,
-        participantNames: otherParticipants.map(p => p.username).join(', '),
-        lastMessage: conv.lastMessage ? conv.lastMessage.text : 'No messages yet',
-        updatedAt: conv.updatedAt
-      };
-    }));
-  } catch (error) {
-    console.error('Error fetching conversations:', error);
-    res.status(500).json({ message: 'Failed to fetch conversations' });
+  let conversations = [];
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbConversations = await models[i].Conversation.find({
+      participants: req.session.userId
+    })
+      .populate('participants', 'username')
+      .populate('lastMessage')
+      .sort({ updatedAt: -1 });
+    conversations = conversations.concat(dbConversations);
   }
+
+  res.json(conversations.map(conv => {
+    const otherParticipants = conv.participants.filter(p => String(p._id) !== String(req.session.userId));
+    return {
+      _id: conv._id,
+      participants: conv.participants,
+      participantNames: otherParticipants.map(p => p.username).join(', '),
+      lastMessage: conv.lastMessage ? conv.lastMessage.text : 'No messages yet',
+      updatedAt: conv.updatedAt
+    };
+  }));
 });
 
 app.get('/conversations/:conversationId/messages', isAuthenticated, async (req, res) => {
-  try {
-    const { conversationId } = req.params;
-    
-    // Find conversation across all databases
-    let conversation = null;
-    let conversationDB = null;
-    
-    for (let i = 0; i < DB_URIS.length; i++) {
-      if (models[i] && models[i].Conversation) {
-        conversation = await models[i].Conversation.findById(conversationId);
-        if (conversation) {
-          conversationDB = i;
-          break;
-        }
-      }
+  const { conversationId } = req.params;
+  
+  // Find conversation across all databases
+  let conversation = null;
+  let conversationDB = null;
+  
+  for (let i = 0; i < DB_URIS.length; i++) {
+    conversation = await models[i].Conversation.findById(conversationId);
+    if (conversation) {
+      conversationDB = i;
+      break;
     }
-    
-    if (!conversation || !conversation.participants.includes(req.session.userId)) {
-      return res.status(403).json({ message: 'Access denied to this conversation' });
-    }
-
-    const messages = await models[conversationDB].Message.find({ conversation: conversationId })
-      .populate('sender', 'username')
-      .sort({ createdAt: 1 });
-
-    res.json(messages);
-  } catch (error) {
-    console.error('Error fetching messages:', error);
-    res.status(500).json({ message: 'Failed to fetch messages' });
   }
+  
+  if (!conversation || !conversation.participants.includes(req.session.userId)) {
+    return res.status(403).json({ message: 'Access denied to this conversation' });
+  }
+
+  const messages = await models[conversationDB].Message.find({ conversation: conversationId })
+    .populate('sender', 'username')
+    .sort({ createdAt: 1 });
+
+  res.json(messages);
 });
 
 // === Socket.IO for Real-time Chat ===
@@ -940,12 +829,10 @@ io.on('connection', (socket) => {
       let conversationDB = null;
       
       for (let i = 0; i < DB_URIS.length; i++) {
-        if (models[i] && models[i].Conversation) {
-          conversation = await models[i].Conversation.findById(conversationId);
-          if (conversation) {
-            conversationDB = i;
-            break;
-          }
+        conversation = await models[i].Conversation.findById(conversationId);
+        if (conversation) {
+          conversationDB = i;
+          break;
         }
       }
 
@@ -989,15 +876,13 @@ io.on('connection', (socket) => {
       let recipient = null;
       
       for (let i = 0; i < DB_URIS.length; i++) {
-        if (models[i] && models[i].User) {
-          if (!sender) {
-            sender = await models[i].User.findById(senderId);
-          }
-          if (!recipient) {
-            recipient = await models[i].User.findById(recipientId);
-          }
-          if (sender && recipient) break;
+        if (!sender) {
+          sender = await models[i].User.findById(senderId);
         }
+        if (!recipient) {
+          recipient = await models[i].User.findById(recipientId);
+        }
+        if (sender && recipient) break;
       }
 
       if (!sender || !recipient) {
@@ -1008,15 +893,13 @@ io.on('connection', (socket) => {
       // Check if they are friends across all databases
       let areFriends = null;
       for (let i = 0; i < DB_URIS.length; i++) {
-        if (models[i] && models[i].Friendship) {
-          areFriends = await models[i].Friendship.findOne({
-            $or: [
-              { requester: senderId, recipient: recipientId, status: 'accepted' },
-              { requester: recipientId, recipient: senderId, status: 'accepted' }
-            ]
-          });
-          if (areFriends) break;
-        }
+        areFriends = await models[i].Friendship.findOne({
+          $or: [
+            { requester: senderId, recipient: recipientId, status: 'accepted' },
+            { requester: recipientId, recipient: senderId, status: 'accepted' }
+          ]
+        });
+        if (areFriends) break;
       }
 
       if (!areFriends) {
@@ -1033,14 +916,12 @@ io.on('connection', (socket) => {
       let conversationDB = null;
       
       for (let i = 0; i < DB_URIS.length; i++) {
-        if (models[i] && models[i].Conversation) {
-          conversation = await models[i].Conversation.findOne({
-            participants: { $all: [senderId, recipientId], $size: 2 }
-          });
-          if (conversation) {
-            conversationDB = i;
-            break;
-          }
+        conversation = await models[i].Conversation.findOne({
+          participants: { $all: [senderId, recipientId], $size: 2 }
+        });
+        if (conversation) {
+          conversationDB = i;
+          break;
         }
       }
 
