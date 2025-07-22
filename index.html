@@ -31,6 +31,67 @@
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
+    /* Upload Progress Styles */
+    .upload-progress-container {
+      margin-top: 10px;
+      display: none;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+    }
+    .upload-progress-bar {
+      width: 100%;
+      height: 20px;
+      background-color: #e9ecef;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .upload-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4267b2, #365899);
+      width: 0%;
+      transition: width 0.3s ease;
+      border-radius: 10px;
+      position: relative;
+    }
+    .upload-progress-fill::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      background-image: linear-gradient(
+        -45deg,
+        rgba(255, 255, 255, .2) 25%,
+        transparent 25%,
+        transparent 50%,
+        rgba(255, 255, 255, .2) 50%,
+        rgba(255, 255, 255, .2) 75%,
+        transparent 75%,
+        transparent
+      );
+      background-size: 50px 50px;
+      animation: move 2s linear infinite;
+    }
+    @keyframes move {
+      0% { background-position: 0 0; }
+      100% { background-position: 50px 50px; }
+    }
+    .upload-progress-text {
+      text-align: center;
+      font-size: 14px;
+      color: #495057;
+      font-weight: 500;
+    }
+    .upload-status {
+      margin-top: 5px;
+      font-size: 12px;
+      color: #6c757d;
+    }
+
     /* Chat specific styles */
     .chat-container { display: flex; flex-direction: column; height: calc(100vh - 120px); background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
     .chat-messages { flex-grow: 1; overflow-y: auto; padding: 1rem; border-bottom: 1px solid #eee; display: flex; flex-direction: column; }
@@ -134,6 +195,37 @@
     .clickable-username:hover {
         text-decoration: underline;
     }
+
+    /* Profile Picture Upload Progress */
+    .profile-upload-progress-container {
+      margin-top: 10px;
+      display: none;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+    }
+    .profile-upload-progress-bar {
+      width: 100%;
+      height: 15px;
+      background-color: #e9ecef;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 5px;
+    }
+    .profile-upload-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #28a745, #20c997);
+      width: 0%;
+      transition: width 0.3s ease;
+      border-radius: 8px;
+    }
+    .profile-upload-progress-text {
+      text-align: center;
+      font-size: 12px;
+      color: #495057;
+      font-weight: 500;
+    }
   </style>
 </head>
 <body>
@@ -182,7 +274,16 @@
           <form id="postForm">
             <textarea name="text" placeholder="What's on your mind?" required></textarea>
             <input type="file" name="media" accept="image/*,video/*" />
-            <button type="submit">Post</button>
+            <button type="submit" id="postSubmitBtn">Post</button>
+            
+            <!-- Upload Progress Container -->
+            <div id="uploadProgressContainer" class="upload-progress-container">
+              <div class="upload-progress-bar">
+                <div id="uploadProgressFill" class="upload-progress-fill"></div>
+              </div>
+              <div id="uploadProgressText" class="upload-progress-text">Uploading... 0%</div>
+              <div id="uploadStatus" class="upload-status">Preparing upload...</div>
+            </div>
           </form>
           <hr />
           <div id="posts"></div>
@@ -198,7 +299,15 @@
                 <div id="myProfileEditControls" class="profile-edit-controls" style="display:none;">
                     <input type="file" id="profilePicInput" accept="image/*" />
                     <input type="text" id="newUsernameInput" placeholder="New Username" />
-                    <button onclick="updateProfile()">Update Profile</button>
+                    <button onclick="updateProfile()" id="profileUpdateBtn">Update Profile</button>
+                    
+                    <!-- Profile Picture Upload Progress Container -->
+                    <div id="profileUploadProgressContainer" class="profile-upload-progress-container">
+                      <div class="profile-upload-progress-bar">
+                        <div id="profileUploadProgressFill" class="profile-upload-progress-fill"></div>
+                      </div>
+                      <div id="profileUploadProgressText" class="profile-upload-progress-text">Uploading... 0%</div>
+                    </div>
                 </div>
             </div>
             <hr />
@@ -250,6 +359,10 @@
 
     let replyingTo = null; // Stores message data being replied to: { _id, senderUsername, text }
     let currentProfileUser = null; // Stores the user object whose profile is currently being viewed
+
+    // Upload progress tracking variables
+    let currentUploadXHR = null;
+    let currentProfileUploadXHR = null;
 
     async function login() {
       const username = document.getElementById('username').value;
@@ -374,26 +487,106 @@
       }
     }
 
-    // --- Post Management ---
+    // --- Upload Progress Functions ---
+    function showUploadProgress() {
+      document.getElementById('uploadProgressContainer').style.display = 'block';
+      document.getElementById('postSubmitBtn').disabled = true;
+      document.getElementById('postSubmitBtn').textContent = 'Uploading...';
+    }
+
+    function hideUploadProgress() {
+      document.getElementById('uploadProgressContainer').style.display = 'none';
+      document.getElementById('postSubmitBtn').disabled = false;
+      document.getElementById('postSubmitBtn').textContent = 'Post';
+      document.getElementById('uploadProgressFill').style.width = '0%';
+      document.getElementById('uploadProgressText').textContent = 'Uploading... 0%';
+      document.getElementById('uploadStatus').textContent = 'Preparing upload...';
+    }
+
+    function updateUploadProgress(percentage, status = '') {
+      document.getElementById('uploadProgressFill').style.width = percentage + '%';
+      document.getElementById('uploadProgressText').textContent = `Uploading... ${Math.round(percentage)}%`;
+      if (status) {
+        document.getElementById('uploadStatus').textContent = status;
+      }
+    }
+
+    function showProfileUploadProgress() {
+      document.getElementById('profileUploadProgressContainer').style.display = 'block';
+      document.getElementById('profileUpdateBtn').disabled = true;
+      document.getElementById('profileUpdateBtn').textContent = 'Uploading...';
+    }
+
+    function hideProfileUploadProgress() {
+      document.getElementById('profileUploadProgressContainer').style.display = 'none';
+      document.getElementById('profileUpdateBtn').disabled = false;
+      document.getElementById('profileUpdateBtn').textContent = 'Update Profile';
+      document.getElementById('profileUploadProgressFill').style.width = '0%';
+      document.getElementById('profileUploadProgressText').textContent = 'Uploading... 0%';
+    }
+
+    function updateProfileUploadProgress(percentage) {
+      document.getElementById('profileUploadProgressFill').style.width = percentage + '%';
+      document.getElementById('profileUploadProgressText').textContent = `Uploading... ${Math.round(percentage)}%`;
+    }
+
+    // --- Post Management with Progress ---
     document.getElementById('postForm').onsubmit = async (e) => {
       e.preventDefault();
+      
       const formData = new FormData(e.target);
-      const res = await fetch('/post', {
-        method: 'POST',
-        body: formData
-      });
-      if (res.ok) {
-        e.target.reset();
-        skip = 0; // Reset skip for main feed
-        document.getElementById('posts').innerHTML = '';
-        loadPosts();
-        // If currently viewing my own profile, refresh its posts
-        if (currentProfileUser && currentProfileUser.username === loggedInUser) {
-            openProfile(loggedInUser);
-        }
-      } else {
-        alert('Failed to create post. Are you logged in?');
+      const fileInput = e.target.querySelector('input[type="file"]');
+      const hasFile = fileInput.files.length > 0;
+      
+      if (hasFile) {
+        showUploadProgress();
+        updateUploadProgress(0, 'Preparing file...');
       }
+
+      // Create XMLHttpRequest for progress tracking
+      currentUploadXHR = new XMLHttpRequest();
+      
+      currentUploadXHR.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable && hasFile) {
+          const percentage = (event.loaded / event.total) * 100;
+          updateUploadProgress(percentage, `Uploading ${fileInput.files[0].name}...`);
+        }
+      });
+
+      currentUploadXHR.addEventListener('load', () => {
+        if (currentUploadXHR.status === 200) {
+          if (hasFile) {
+            updateUploadProgress(100, 'Upload complete!');
+            setTimeout(() => {
+              hideUploadProgress();
+            }, 1000);
+          }
+          e.target.reset();
+          skip = 0; // Reset skip for main feed
+          document.getElementById('posts').innerHTML = '';
+          loadPosts();
+          // If currently viewing my own profile, refresh its posts
+          if (currentProfileUser && currentProfileUser.username === loggedInUser) {
+              openProfile(loggedInUser);
+          }
+        } else {
+          hideUploadProgress();
+          alert('Failed to create post. Are you logged in?');
+        }
+      });
+
+      currentUploadXHR.addEventListener('error', () => {
+        hideUploadProgress();
+        alert('Upload failed. Please try again.');
+      });
+
+      currentUploadXHR.addEventListener('abort', () => {
+        hideUploadProgress();
+        alert('Upload cancelled.');
+      });
+
+      currentUploadXHR.open('POST', '/post');
+      currentUploadXHR.send(formData);
     };
 
     async function loadPosts() {
@@ -687,7 +880,7 @@
       cancelReply(); // Clear any pending reply when chat is closed
     }
 
-    // --- Profile Section Functions ---
+    // --- Profile Section Functions with Progress ---
 
     // Navigates to and loads the currently logged-in user's profile
     async function showMyProfile() {
@@ -770,24 +963,60 @@
         }
         if (profilePicFile) {
             formData.append('profilePicture', profilePicFile);
+            showProfileUploadProgress();
+            updateProfileUploadProgress(0);
         }
 
-        const res = await fetch('/profile/update', {
-            method: 'POST',
-            body: formData
+        // Create XMLHttpRequest for progress tracking
+        currentProfileUploadXHR = new XMLHttpRequest();
+        
+        if (profilePicFile) {
+          currentProfileUploadXHR.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              const percentage = (event.loaded / event.total) * 100;
+              updateProfileUploadProgress(percentage);
+            }
+          });
+        }
+
+        currentProfileUploadXHR.addEventListener('load', () => {
+          if (currentProfileUploadXHR.status === 200) {
+            const result = JSON.parse(currentProfileUploadXHR.responseText);
+            if (result.success) {
+              if (profilePicFile) {
+                updateProfileUploadProgress(100);
+                setTimeout(() => {
+                  hideProfileUploadProgress();
+                }, 1000);
+              }
+              alert(result.message);
+              // Update client-side session data and UI
+              loggedInUser = result.updatedUser.username;
+              loggedInProfilePicture = result.updatedUser.profilePicture || '/images/default-profile.png';
+              updateHeaderUserInfo();
+              openProfile(loggedInUser); // Reload my profile to reflect changes
+            } else {
+              hideProfileUploadProgress();
+              alert(`Failed to update profile: ${result.message}`);
+            }
+          } else {
+            hideProfileUploadProgress();
+            alert('Failed to update profile. Please try again.');
+          }
         });
-        const result = await res.json();
 
-        if (result.success) {
-            alert(result.message);
-            // Update client-side session data and UI
-            loggedInUser = result.updatedUser.username;
-            loggedInProfilePicture = result.updatedUser.profilePicture || '/images/default-profile.png';
-            updateHeaderUserInfo();
-            openProfile(loggedInUser); // Reload my profile to reflect changes
-        } else {
-            alert(`Failed to update profile: ${result.message}`);
-        }
+        currentProfileUploadXHR.addEventListener('error', () => {
+          hideProfileUploadProgress();
+          alert('Profile update failed. Please try again.');
+        });
+
+        currentProfileUploadXHR.addEventListener('abort', () => {
+          hideProfileUploadProgress();
+          alert('Profile update cancelled.');
+        });
+
+        currentProfileUploadXHR.open('POST', '/profile/update');
+        currentProfileUploadXHR.send(formData);
     }
 
     // --- Initial Load ---
