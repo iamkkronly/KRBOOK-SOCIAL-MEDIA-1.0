@@ -320,6 +320,17 @@
     .modal-content input {
       margin: 10px 0;
     }
+
+    /* Single Post View Specific Styles */
+    #singlePostView {
+        display: none; /* Hidden by default */
+        max-width: 600px;
+        margin: 2rem auto;
+        padding: 1rem;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+    }
   </style>
 </head>
 <body>
@@ -380,7 +391,7 @@
           </form>
           <hr />
           <div id="posts"></div>
-          <button onclick="loadMore()">Load More</button>
+          <button id="loadMoreBtn" onclick="loadMore()">Load More</button>
         </section>
 
         <section id="profileTab" class="tab-content container">
@@ -436,6 +447,12 @@
         </section>
       </div>
     </div>
+
+    <section id="singlePostView" class="container">
+      <button onclick="window.location.href='/'" style="margin-bottom: 1rem;">Back to Feed</button>
+      <div id="singlePostContainer">
+        </div>
+    </section>
   </main>
 
   <div id="shareModal" class="modal-overlay">
@@ -520,6 +537,9 @@
         document.getElementById('profilePosts').innerHTML = ''; // Clear profile posts
         currentProfileUser = null;
         closeChat(); // Close any active chat
+
+        // Hide single post view if it was active
+        document.getElementById('singlePostView').style.display = 'none';
       } else {
         alert('Failed to log out.');
       }
@@ -598,7 +618,8 @@
 
         socket.on('newComment', (comment) => {
           const commentsList = document.getElementById(`commentsList-${comment.postId}`);
-          if (commentsList && commentsList.style.display !== 'none') { // Only append if section is open
+          // If comments section for this post is open or it's a single post view, append the comment
+          if (commentsList && (commentsList.style.display !== 'none' || document.getElementById('singlePostView').style.display === 'block')) {
             appendCommentToPost(commentsList, comment);
           }
           const commentsCountSpan = document.getElementById(`comments-count-${comment.postId}`);
@@ -1265,7 +1286,8 @@
 
     // --- Share Modal Functions ---
     function showShareOptions(postId) {
-        const shareLink = `${window.location.origin}/post/${postId}`; // Example: A dedicated post page link
+        // Construct the full URL for the shared post
+        const shareLink = `${window.location.origin}/post/${postId}`;
         document.getElementById('shareLinkInput').value = shareLink;
         document.getElementById('shareModal').style.display = 'flex'; // Show modal
     }
@@ -1281,8 +1303,48 @@
         alert('Link copied to clipboard!');
     }
 
+    // --- Single Post View Logic ---
+    async function renderSinglePost(postId) {
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('appContent').style.display = 'none';
+        document.getElementById('singlePostView').style.display = 'block';
+        document.getElementById('singlePostContainer').innerHTML = 'Loading post...';
+
+        try {
+            const res = await fetch(`/api/post/${postId}`);
+            if (!res.ok) {
+                document.getElementById('singlePostContainer').innerHTML = '<p>Post not found or an error occurred.</p>';
+                return;
+            }
+            const post = await res.json();
+            const container = document.getElementById('singlePostContainer');
+            container.innerHTML = ''; // Clear loading message
+
+            await addPostToFeed(post, container); // Use the existing function to render the post
+            // Make sure comments section is open by default for single post view
+            toggleCommentsSection(postId);
+        } catch (error) {
+            console.error('Error loading single post:', error);
+            document.getElementById('singlePostContainer').innerHTML = '<p>Error loading post.</p>';
+        }
+    }
+
     // --- Initial Load ---
-    document.addEventListener('DOMContentLoaded', fetchSession);
+    document.addEventListener('DOMContentLoaded', async () => {
+        const pathSegments = window.location.pathname.split('/');
+        // Check if the URL matches the pattern /post/:postId
+        if (pathSegments.length === 3 && pathSegments[1] === 'post' && pathSegments[2]) {
+            const postId = pathSegments[2];
+            await renderSinglePost(postId);
+            // If the user logs in while viewing a single post, they will be redirected to the main feed by fetchSession,
+            // which is a reasonable default behavior. If you want them to stay on the single post, you'd need
+            // to modify fetchSession's post-login flow.
+        } else {
+            // Normal app startup
+            await fetchSession();
+        }
+    });
   </script>
 </body>
 </html>
+
