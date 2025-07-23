@@ -41,6 +41,8 @@ const PostSchema = new mongoose.Schema({
   media: String, // Will store "data:image/jpeg;base64,..." or video data
   mediaType: String, // MIME type
   mediaSize: Number, // File size in bytes
+  likesCount: { type: Number, default: 0 }, // New: Store number of likes
+  commentsCount: { type: Number, default: 0 }, // New: Store number of comments
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -69,6 +71,21 @@ const MessageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// New Schemas for Likes and Comments
+const LikeSchema = new mongoose.Schema({
+  postId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const CommentSchema = new mongoose.Schema({
+  postId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  username: { type: String, required: true }, // Store username for easier display
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
 async function connectDatabases() {
   for (let i = 0; i < DB_URIS.length; i++) {
     const conn = await mongoose.createConnection(DB_URIS[i], { useNewUrlParser: true, useUnifiedTopology: true });
@@ -78,7 +95,9 @@ async function connectDatabases() {
       Post: conn.model('Post', PostSchema),
       Friendship: conn.model('Friendship', FriendshipSchema),
       Conversation: conn.model('Conversation', ConversationSchema),
-      Message: conn.model('Message', MessageSchema)
+      Message: conn.model('Message', MessageSchema),
+      Like: conn.model('Like', LikeSchema), // Add Like model
+      Comment: conn.model('Comment', CommentSchema) // Add Comment model
     };
     console.log(`Connected to DB ${i + 1}`);
   }
@@ -88,13 +107,13 @@ async function connectDatabases() {
 async function getActiveDB() {
   const model = models[currentDB];
   const count = await model.Post.estimatedDocumentCount();
-  
+
   // Check if current database has too many posts (you can adjust this threshold)
   if (count >= 5000 && currentDB + 1 < DB_URIS.length) {
     console.log(`Database ${currentDB + 1} is getting full (${count} posts). Switching to database ${currentDB + 2}`);
     currentDB++;
   }
-  
+
   return models[currentDB];
 }
 
@@ -118,16 +137,6 @@ async function fetchUserPosts(username, skip = 0, limit = 10) {
   return userPosts.slice(0, limit);
 }
 
-// Helper function to convert file to base64
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = error => reject(error);
-  });
-}
-
 // Helper function to convert buffer to base64 data URL
 function bufferToDataURL(buffer, mimeType) {
   const base64 = buffer.toString('base64');
@@ -148,6 +157,14 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// New route for dedicated post page (for sharing functionality)
+// This is a minimal example. A full post page would typically render the post dynamically.
+app.get('/post/:postId', (req, res) => {
+  // For now, redirect to main page or a generic view, as the app is single-page
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+
 const isAuthenticated = (req, res, next) => {
   if (req.session.user) {
     next();
@@ -159,7 +176,7 @@ const isAuthenticated = (req, res, next) => {
 // Configure multer to store files in memory (not on disk)
 const upload = multer({
   storage: multer.memoryStorage(), // Store in memory instead of disk
-  limits: { 
+  limits: {
     fileSize: 10 * 1024 * 1024 // 10MB limit as requested
   },
   fileFilter: (req, file, cb) => {
@@ -175,11 +192,11 @@ const upload = multer({
 // === Authentication Routes ===
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  
+
   // Search for user across all databases
   let user = null;
   let userDB = null;
-  
+
   for (let i = 0; i < DB_URIS.length; i++) {
     const foundUser = await models[i].User.findOne({ username });
     if (foundUser) {
@@ -188,7 +205,7 @@ app.post('/login', async (req, res) => {
       break;
     }
   }
-  
+
   if (!user) {
     // Create new user in the current active database
     const { User } = await getActiveDB();
@@ -197,10 +214,10 @@ app.post('/login', async (req, res) => {
   } else if (user.password !== password) {
     return res.json({ success: false, message: 'Wrong password' });
   }
-  
+
   req.session.user = username;
   req.session.userId = user._id;
-  
+
   // Handle profile picture - if it's stored as base64, use it; otherwise use default
   let profilePicture = '/images/default-profile.png';
   if (user.profilePictureData && user.profilePictureType) {
@@ -208,7 +225,7 @@ app.post('/login', async (req, res) => {
   } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
     profilePicture = user.profilePicture;
   }
-  
+
   req.session.profilePicture = profilePicture;
   res.json({ success: true, username: username, userId: user._id, profilePicture: profilePicture });
 });
@@ -224,17 +241,17 @@ app.get('/session', async (req, res) => {
         break;
       }
     }
-    
+
     if (user) {
       req.session.user = user.username;
-      
+
       let profilePicture = '/images/default-profile.png';
       if (user.profilePictureData && user.profilePictureType) {
         profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
       } else if (user.profilePicture && user.profilePicture !== '/images/default-profile.png') {
         profilePicture = user.profilePicture;
       }
-      
+
       req.session.profilePicture = profilePicture;
       return res.json({ username: user.username, userId: user._id, profilePicture: profilePicture });
     }
@@ -255,25 +272,27 @@ app.post('/post', isAuthenticated, upload.single('media'), async (req, res) => {
     let mediaData = null;
     let mediaType = null;
     let mediaSize = 0;
-    
+
     if (req.file) {
       // Convert uploaded file to base64 data URL
       mediaData = bufferToDataURL(req.file.buffer, req.file.mimetype);
       mediaType = req.file.mimetype;
       mediaSize = req.file.size;
-      
+
       console.log(`Storing ${mediaType} file of ${mediaSize} bytes in database`);
     }
-    
+
     const { Post } = await getActiveDB();
     const post = new Post({
       username: req.session.user,
       text: req.body.text,
       media: mediaData, // Store base64 data URL directly
       mediaType: mediaType,
-      mediaSize: mediaSize
+      mediaSize: mediaSize,
+      likesCount: 0, // Initialize
+      commentsCount: 0 // Initialize
     });
-    
+
     await post.save();
     console.log(`Post saved to database ${currentDB + 1}`);
     res.end();
@@ -294,11 +313,14 @@ app.get('/posts', async (req, res) => {
 
 app.delete('/post/:id', isAuthenticated, async (req, res) => {
   for (let i = 0; i < DB_URIS.length; i++) {
-    const { Post } = models[i];
+    const { Post, Like, Comment } = models[i];
     const post = await Post.findById(req.params.id);
     if (post && String(post.username) === String(req.session.user)) {
       await Post.deleteOne({ _id: req.params.id });
-      console.log(`Post ${req.params.id} deleted from database ${i + 1}`);
+      // Delete associated likes and comments
+      await Like.deleteMany({ postId: req.params.id });
+      await Comment.deleteMany({ postId: req.params.id });
+      console.log(`Post ${req.params.id} and its associated likes/comments deleted from database ${i + 1}`);
       return res.end();
     }
   }
@@ -311,7 +333,7 @@ app.use('/images', express.static(path.join(__dirname, 'public', 'images')));
 // === Profile Routes ===
 app.get('/profile/:username', async (req, res) => {
   const targetUsername = req.params.username;
-  
+
   // Search for user across all databases
   let userProfile = null;
   for (let i = 0; i < DB_URIS.length; i++) {
@@ -352,7 +374,7 @@ app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), as
     // Find user across all databases
     let user = null;
     let userDB = null;
-    
+
     for (let i = 0; i < DB_URIS.length; i++) {
       const foundUser = await models[i].User.findById(req.session.userId);
       if (foundUser) {
@@ -377,11 +399,11 @@ app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), as
           break;
         }
       }
-      
+
       if (existingUser) {
         return res.status(409).json({ message: 'Username already taken' });
       }
-      
+
       user.username = req.body.username;
       req.session.user = req.body.username;
     }
@@ -393,17 +415,17 @@ app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), as
       user.profilePictureType = req.file.mimetype;
       user.profilePicture = `data:${req.file.mimetype};base64,${user.profilePictureData}`;
       req.session.profilePicture = user.profilePicture;
-      
+
       console.log(`Profile picture updated for user ${user.username} in database ${userDB + 1}`);
     }
 
     await user.save();
-    
+
     let profilePicture = '/images/default-profile.png';
     if (user.profilePictureData && user.profilePictureType) {
       profilePicture = `data:${user.profilePictureType};base64,${user.profilePictureData}`;
     }
-    
+
     res.json({
       success: true,
       message: 'Profile updated successfully',
@@ -425,7 +447,7 @@ app.post('/profile/update', isAuthenticated, upload.single('profilePicture'), as
 app.get('/users/search', isAuthenticated, async (req, res) => {
   const { query } = req.query;
   if (!query) return res.json([]);
-  
+
   let users = [];
   // Search across all databases
   for (let i = 0; i < DB_URIS.length; i++) {
@@ -435,17 +457,17 @@ app.get('/users/search', isAuthenticated, async (req, res) => {
     }).select('username');
     users = users.concat(dbUsers);
   }
-  
+
   res.json(users);
 });
 
 app.post('/friends/request/:recipientUsername', isAuthenticated, async (req, res) => {
   const { recipientUsername } = req.params;
-  
+
   // Find requester and recipient across all databases
   let requester = null;
   let recipient = null;
-  
+
   for (let i = 0; i < DB_URIS.length; i++) {
     if (!requester) {
       requester = await models[i].User.findById(req.session.userId);
@@ -491,11 +513,11 @@ app.post('/friends/request/:recipientUsername', isAuthenticated, async (req, res
 
 app.post('/friends/accept/:requesterUsername', isAuthenticated, async (req, res) => {
   const { requesterUsername } = req.params;
-  
+
   // Find users across all databases
   let recipient = null;
   let requester = null;
-  
+
   for (let i = 0; i < DB_URIS.length; i++) {
     if (!recipient) {
       recipient = await models[i].User.findById(req.session.userId);
@@ -530,11 +552,11 @@ app.post('/friends/accept/:requesterUsername', isAuthenticated, async (req, res)
 
 app.post('/friends/decline/:requesterUsername', isAuthenticated, async (req, res) => {
   const { requesterUsername } = req.params;
-  
+
   // Find users across all databases
   let recipient = null;
   let requester = null;
-  
+
   for (let i = 0; i < DB_URIS.length; i++) {
     if (!recipient) {
       recipient = await models[i].User.findById(req.session.userId);
@@ -588,7 +610,7 @@ app.get('/friends/list', isAuthenticated, async (req, res) => {
     }).populate('requester recipient', 'username');
     friends = friends.concat(dbFriends);
   }
-  
+
   res.json(friends.map(f => {
     if (String(f.requester._id) === String(req.session.userId)) {
       return { _id: f.recipient._id, username: f.recipient.username };
@@ -597,6 +619,143 @@ app.get('/friends/list', isAuthenticated, async (req, res) => {
     }
   }));
 });
+
+// === Likes Routes ===
+app.post('/post/:postId/like', isAuthenticated, async (req, res) => {
+  const { postId } = req.params;
+  const userId = req.session.userId;
+
+  let post = null;
+  let postDB = null;
+  let like = null;
+
+  // Find post and check for existing like across all databases
+  for (let i = 0; i < DB_URIS.length; i++) {
+    post = await models[i].Post.findById(postId);
+    if (post) {
+      postDB = i;
+      like = await models[i].Like.findOne({ postId, userId });
+      break;
+    }
+  }
+
+  if (!post) {
+    return res.status(404).json({ message: 'Post not found' });
+  }
+
+  const { Post, Like } = models[postDB];
+  let newLikesCount;
+  let likedStatus;
+
+  if (like) {
+    // Unlike the post
+    await Like.deleteOne({ _id: like._id });
+    post.likesCount = Math.max(0, post.likesCount - 1);
+    likedStatus = false;
+  } else {
+    // Like the post
+    const newLike = new Like({ postId, userId });
+    await newLike.save();
+    post.likesCount = (post.likesCount || 0) + 1;
+    likedStatus = true;
+  }
+  await post.save();
+  newLikesCount = post.likesCount;
+
+  // Emit Socket.IO event to all connected clients for real-time update
+  io.emit('postLiked', { postId: postId, newLikesCount: newLikesCount });
+
+  res.json({ success: true, newLikesCount: newLikesCount, liked: likedStatus });
+});
+
+app.get('/post/:postId/isLiked', isAuthenticated, async (req, res) => {
+  const { postId } = req.params;
+  const userId = req.session.userId;
+
+  let isLiked = false;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const like = await models[i].Like.findOne({ postId, userId });
+    if (like) {
+      isLiked = true;
+      break;
+    }
+  }
+  res.json({ isLiked });
+});
+
+
+// === Comments Routes ===
+app.post('/post/:postId/comment', isAuthenticated, async (req, res) => {
+  const { postId } = req.params;
+  const { text } = req.body;
+  const userId = req.session.userId;
+  const username = req.session.user;
+
+  let post = null;
+  let postDB = null;
+
+  // Find the post across all databases
+  for (let i = 0; i < DB_URIS.length; i++) {
+    post = await models[i].Post.findById(postId);
+    if (post) {
+      postDB = i;
+      break;
+    }
+  }
+
+  if (!post) {
+    return res.status(404).json({ message: 'Post not found' });
+  }
+
+  const { Post, Comment } = models[postDB];
+  const newComment = new Comment({ postId, userId, username, text });
+  await newComment.save();
+
+  post.commentsCount = (post.commentsCount || 0) + 1;
+  await post.save();
+
+  // Emit Socket.IO event for new comment
+  io.emit('newComment', {
+    _id: newComment._id,
+    postId: newComment.postId,
+    userId: newComment.userId,
+    username: newComment.username,
+    text: newComment.text,
+    createdAt: newComment.createdAt,
+    postCommentsCount: post.commentsCount // Send updated count
+  });
+
+  res.status(201).json({ success: true, message: 'Comment added' });
+});
+
+app.get('/post/:postId/comments', isAuthenticated, async (req, res) => {
+  const { postId } = req.params;
+
+  let comments = [];
+  // Search for comments across all databases that contain the postId
+  // This is potentially inefficient if comments are scattered, but aligns with existing multi-DB logic
+  for (let i = 0; i < DB_URIS.length; i++) {
+    const dbComments = await models[i].Comment.find({ postId: postId })
+                                              .populate('userId', 'username') // Populate sender username if needed
+                                              .sort({ createdAt: 1 });
+    comments = comments.concat(dbComments);
+  }
+  // Sort again to ensure correct chronological order if comments from different DBs are mixed
+  comments.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+  // Remap to flatten the structure for the frontend if userId was populated
+  const formattedComments = comments.map(comment => ({
+    _id: comment._id,
+    postId: comment.postId,
+    userId: comment.userId ? comment.userId._id : null, // Ensure ID is extracted
+    username: comment.username, // Use the stored username for simplicity
+    text: comment.text,
+    createdAt: comment.createdAt
+  }));
+
+  res.json(formattedComments);
+});
+
 
 // === Chat System Routes ===
 app.get('/conversations', isAuthenticated, async (req, res) => {
@@ -625,11 +784,11 @@ app.get('/conversations', isAuthenticated, async (req, res) => {
 
 app.get('/conversations/:conversationId/messages', isAuthenticated, async (req, res) => {
   const { conversationId } = req.params;
-  
+
   // Find conversation across all databases
   let conversation = null;
   let conversationDB = null;
-  
+
   for (let i = 0; i < DB_URIS.length; i++) {
     conversation = await models[i].Conversation.findById(conversationId);
     if (conversation) {
@@ -637,7 +796,7 @@ app.get('/conversations/:conversationId/messages', isAuthenticated, async (req, 
       break;
     }
   }
-  
+
   if (!conversation || !conversation.participants.includes(req.session.userId)) {
     return res.status(403).json({ message: 'Access denied to this conversation' });
   }
@@ -649,7 +808,7 @@ app.get('/conversations/:conversationId/messages', isAuthenticated, async (req, 
   res.json(messages);
 });
 
-// === Socket.IO for Real-time Chat ===
+// === Socket.IO for Real-time Chat, Likes, Comments ===
 const userSockets = new Map();
 
 io.on('connection', (socket) => {
@@ -665,7 +824,7 @@ io.on('connection', (socket) => {
       // Find conversation across all databases
       let conversation = null;
       let conversationDB = null;
-      
+
       for (let i = 0; i < DB_URIS.length; i++) {
         conversation = await models[i].Conversation.findById(conversationId);
         if (conversation) {
@@ -712,7 +871,7 @@ io.on('connection', (socket) => {
       // Find users across all databases
       let sender = null;
       let recipient = null;
-      
+
       for (let i = 0; i < DB_URIS.length; i++) {
         if (!sender) {
           sender = await models[i].User.findById(senderId);
@@ -752,7 +911,7 @@ io.on('connection', (socket) => {
       // Try to find existing conversation across all databases
       let conversation = null;
       let conversationDB = null;
-      
+
       for (let i = 0; i < DB_URIS.length; i++) {
         conversation = await models[i].Conversation.findOne({
           participants: { $all: [senderId, recipientId], $size: 2 }
@@ -821,7 +980,7 @@ async function startServer() {
     await connectDatabases();
     console.log('All databases connected. Images will be stored directly in MongoDB.');
     console.log(`Currently using database ${currentDB + 1} for new posts.`);
-    
+
     httpServer.listen(PORT, () => console.log(`KRBOOK running on http://localhost:${PORT}`));
   } catch (error) {
     console.error("Failed to connect to databases or start server:", error);
