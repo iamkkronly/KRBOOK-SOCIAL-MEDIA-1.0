@@ -20,7 +20,7 @@ const DB_URIS = [
   'mongodb+srv://fofis98511:lnZ4jkqN7edg3TPz@cluster0.52fvmow.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
   'mongodb+srv://hoxow91206:0M3sqwNuPqvXzHVE@cluster0.87yfxeq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
   'mongodb+srv://pavel92297:X5ZBEtkDp6njO0bc@cluster0.qvjst5u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
-'mongodb+srv://vifibi2050:6eqd3hHSYjEy8uMU@cluster0.pazikdq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+  'mongodb+srv://vifibi2050:6eqd3hHSYjEy8uMU@cluster0.pazikdq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0' // Added new database
 ];
 
 let currentDB = 0;
@@ -52,7 +52,7 @@ const FriendshipSchema = new mongoose.Schema({
   recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'declined', 'blocked'],
+    enum: ['pending', 'accepted', 'decline', 'blocked'],
     default: 'pending'
   },
   createdAt: { type: Date, default: Date.now }
@@ -121,12 +121,21 @@ async function getActiveDB() {
 async function fetchAllPosts(skip = 0, limit = 10) {
   let all = [];
   for (let i = 0; i < DB_URIS.length; i++) {
-    const dbPosts = await models[i].Post.find().sort({ createdAt: -1 }).skip(skip).limit(limit);
+    // For random order, we will fetch all posts and then shuffle.
+    // In a production environment with many posts, you would need a more scalable approach,
+    // e.g., sampling posts, or using aggregation pipelines with $sample if MongoDB version supports it efficiently across sharded clusters.
+    // For this example, we'll fetch all then shuffle to ensure randomness across DBs.
+    const dbPosts = await models[i].Post.find();
     all = all.concat(dbPosts);
   }
-  all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  return all.slice(0, limit);
+  // Shuffle the posts to make them appear randomly
+  for (let i = all.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [all[i], all[j]] = [all[j], all[i]];
+  }
+  return all.slice(skip, skip + limit);
 }
+
 
 async function fetchUserPosts(username, skip = 0, limit = 10) {
   let userPosts = [];
@@ -308,6 +317,7 @@ app.post('/post', isAuthenticated, upload.single('media'), async (req, res) => {
 
 app.get('/posts', async (req, res) => {
   const skip = parseInt(req.query.skip) || 0;
+  // Posts are now fetched and shuffled inside fetchAllPosts
   const posts = await fetchAllPosts(skip, 10);
   res.json(posts);
 });
@@ -758,7 +768,7 @@ app.get('/post/:postId/comments', isAuthenticated, async (req, res) => {
 });
 
 
-// === Chat System Routes ===
+// === Chat System ===
 app.get('/conversations', isAuthenticated, async (req, res) => {
   let conversations = [];
   for (let i = 0; i < DB_URIS.length; i++) {
