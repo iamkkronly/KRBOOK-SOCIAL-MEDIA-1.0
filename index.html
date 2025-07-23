@@ -226,6 +226,100 @@
       color: #495057;
       font-weight: 500;
     }
+
+    /* Post Actions (Like, Comment, Share) */
+    .post-actions {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+    .post-actions button {
+      flex-basis: 30%;
+      margin: 0 5px;
+      background: #f0f2f5;
+      color: #606770;
+      border: none;
+      padding: 8px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .post-actions button:hover {
+      background: #e4e6eb;
+    }
+    .post-actions button.liked {
+      color: #4267b2;
+    }
+    .post-stats {
+      margin-top: 5px;
+      font-size: 0.9em;
+      color: #606770;
+      padding: 0 10px;
+    }
+    .comment-section {
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+    .comment-input-area {
+      display: flex;
+      margin-top: 10px;
+    }
+    .comment-input-area input {
+      flex-grow: 1;
+      margin-right: 10px;
+      margin-top: 0; /* Override general input margin */
+    }
+    .comment-item {
+      background: #f0f2f5;
+      padding: 8px 12px;
+      border-radius: 18px;
+      margin-bottom: 5px;
+    }
+    .comment-item strong {
+      font-size: 0.9em;
+      display: block;
+      margin-bottom: 2px;
+      color: #333;
+    }
+    .comment-item small {
+      font-size: 0.7em;
+      color: #606770;
+    }
+
+    /* Share Modal */
+    .modal-overlay {
+      display: none; /* Hidden by default */
+      position: fixed; /* Stay in place */
+      z-index: 1000; /* Sit on top */
+      left: 0;
+      top: 0;
+      width: 100%; /* Full width */
+      height: 100%; /* Full height */
+      overflow: auto; /* Enable scroll if needed */
+      background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 400px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      text-align: center;
+    }
+    .modal-content button {
+      margin-left: 10px;
+      margin-top: 0; /* Adjust button margin */
+    }
+    .modal-content input {
+      margin: 10px 0;
+    }
   </style>
 </head>
 <body>
@@ -275,8 +369,7 @@
             <textarea name="text" placeholder="What's on your mind?" required></textarea>
             <input type="file" name="media" accept="image/*,video/*" />
             <button type="submit" id="postSubmitBtn">Post</button>
-            
-            <!-- Upload Progress Container -->
+
             <div id="uploadProgressContainer" class="upload-progress-container">
               <div class="upload-progress-bar">
                 <div id="uploadProgressFill" class="upload-progress-fill"></div>
@@ -300,8 +393,7 @@
                     <input type="file" id="profilePicInput" accept="image/*" />
                     <input type="text" id="newUsernameInput" placeholder="New Username" />
                     <button onclick="updateProfile()" id="profileUpdateBtn">Update Profile</button>
-                    
-                    <!-- Profile Picture Upload Progress Container -->
+
                     <div id="profileUploadProgressContainer" class="profile-upload-progress-container">
                       <div class="profile-upload-progress-bar">
                         <div id="profileUploadProgressFill" class="profile-upload-progress-fill"></div>
@@ -346,6 +438,17 @@
     </div>
   </main>
 
+  <div id="shareModal" class="modal-overlay">
+    <div class="modal-content">
+      <h3>Share Post</h3>
+      <p>Copy the link below to share this post:</p>
+      <input type="text" id="shareLinkInput" value="" readonly />
+      <button onclick="copyShareLink()">Copy Link</button>
+      <button onclick="closeShareModal()">Close</button>
+    </div>
+  </div>
+
+
   <script src="/socket.io/socket.io.js"></script>
   <script>
     let skip = 0; // For main feed posts
@@ -360,7 +463,7 @@
     let replyingTo = null; // Stores message data being replied to: { _id, senderUsername, text }
     let currentProfileUser = null; // Stores the user object whose profile is currently being viewed
 
-    // Upload progress tracking variables
+    // Upload Progress tracking variables
     let currentUploadXHR = null;
     let currentProfileUploadXHR = null;
 
@@ -484,6 +587,25 @@
         socket.on('chatError', (errorMsg) => {
           alert(`Chat error: ${errorMsg}`);
         });
+
+        // New Socket.IO events for posts
+        socket.on('postLiked', (data) => {
+          const likesSpan = document.getElementById(`likes-${data.postId}`);
+          if (likesSpan) {
+            likesSpan.textContent = `${data.newLikesCount} Likes`;
+          }
+        });
+
+        socket.on('newComment', (comment) => {
+          const commentsList = document.getElementById(`commentsList-${comment.postId}`);
+          if (commentsList && commentsList.style.display !== 'none') { // Only append if section is open
+            appendCommentToPost(commentsList, comment);
+          }
+          const commentsCountSpan = document.getElementById(`comments-count-${comment.postId}`);
+          if (commentsCountSpan) {
+              commentsCountSpan.textContent = `${comment.postCommentsCount} Comments`;
+          }
+        });
       }
     }
 
@@ -533,11 +655,11 @@
     // --- Post Management with Progress ---
     document.getElementById('postForm').onsubmit = async (e) => {
       e.preventDefault();
-      
+
       const formData = new FormData(e.target);
       const fileInput = e.target.querySelector('input[type="file"]');
       const hasFile = fileInput.files.length > 0;
-      
+
       if (hasFile) {
         showUploadProgress();
         updateUploadProgress(0, 'Preparing file...');
@@ -545,7 +667,7 @@
 
       // Create XMLHttpRequest for progress tracking
       currentUploadXHR = new XMLHttpRequest();
-      
+
       currentUploadXHR.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable && hasFile) {
           const percentage = (event.loaded / event.total) * 100;
@@ -592,9 +714,31 @@
     async function loadPosts() {
       const res = await fetch(`/posts?skip=${skip}`);
       const posts = await res.json();
-      posts.forEach(post => {
+      const postsDiv = document.getElementById('posts');
+
+      // Clear posts if it's the first load
+      if (skip === 0) {
+        postsDiv.innerHTML = '';
+      }
+
+      for (const post of posts) {
+        await addPostToFeed(post, postsDiv);
+      }
+      skip += posts.length; // Adjust skip by the actual number of posts loaded
+    }
+
+    async function addPostToFeed(post, containerDiv) {
         const el = document.createElement('div');
         el.className = 'post';
+
+        // Check if the current user has liked this post
+        let isLiked = false;
+        if (loggedInUserId) {
+            const likeRes = await fetch(`/post/${post._id}/isLiked`);
+            const likeData = await likeRes.json();
+            isLiked = likeData.isLiked;
+        }
+
         el.innerHTML = `
           <div>
             <b class="clickable-username" onclick="openProfile('${post.username}')">${post.username}</b>
@@ -602,11 +746,26 @@
           </div>
           <div>${post.text}</div>
           ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
+          <div class="post-stats">
+              <span id="likes-${post._id}">${post.likesCount || 0} Likes</span>
+              <span id="comments-count-${post._id}">${post.commentsCount || 0} Comments</span>
+          </div>
+          <div class="post-actions">
+            <button onclick="toggleLike('${post._id}')" class="${isLiked ? 'liked' : ''}" id="like-btn-${post._id}">Like</button>
+            <button onclick="toggleCommentsSection('${post._id}')">Comment</button>
+            <button onclick="showShareOptions('${post._id}')">Share</button>
+          </div>
+          <div id="commentsSection-${post._id}" class="comment-section" style="display:none;">
+            <div id="commentsList-${post._id}"></div>
+            <div class="comment-input-area">
+                <input type="text" id="commentInput-${post._id}" placeholder="Write a comment..." />
+                <button onclick="addComment('${post._id}')">Post</button>
+            </div>
+          </div>
         `;
-        document.getElementById('posts').appendChild(el);
-      });
-      skip += 10;
+        containerDiv.appendChild(el);
     }
+
 
     function loadMore() {
       loadPosts();
@@ -930,19 +1089,9 @@
         // Display posts for the profile being viewed
         document.getElementById('profilePosts').innerHTML = ''; // Clear previous posts
         if (data.posts && data.posts.length > 0) {
-            data.posts.forEach(post => {
-                const el = document.createElement('div');
-                el.className = 'post';
-                el.innerHTML = `
-                    <div>
-                        <b>${post.username}</b>
-                        ${String(post.username) === String(loggedInUser) ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}
-                    </div>
-                    <div>${post.text}</div>
-                    ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
-                `;
-                document.getElementById('profilePosts').appendChild(el);
-            });
+            for (const post of data.posts) {
+                await addPostToFeed(post, document.getElementById('profilePosts'));
+            }
         } else {
             document.getElementById('profilePosts').innerHTML = '<p>No posts yet.</p>';
         }
@@ -969,7 +1118,7 @@
 
         // Create XMLHttpRequest for progress tracking
         currentProfileUploadXHR = new XMLHttpRequest();
-        
+
         if (profilePicFile) {
           currentProfileUploadXHR.upload.addEventListener('progress', (event) => {
             if (event.lengthComputable) {
@@ -1017,6 +1166,119 @@
 
         currentProfileUploadXHR.open('POST', '/profile/update');
         currentProfileUploadXHR.send(formData);
+    }
+
+
+    // --- Post Likes and Comments ---
+
+    async function toggleLike(postId) {
+        if (!loggedInUserId) {
+            alert('Please log in to like posts.');
+            return;
+        }
+        const res = await fetch(`/post/${postId}/like`, { method: 'POST' });
+        if (res.ok) {
+            const data = await res.json();
+            const likeBtn = document.getElementById(`like-btn-${postId}`);
+            const likesSpan = document.getElementById(`likes-${postId}`);
+            if (likesSpan) {
+                likesSpan.textContent = `${data.newLikesCount} Likes`;
+            }
+            if (likeBtn) {
+                if (data.liked) {
+                    likeBtn.classList.add('liked');
+                } else {
+                    likeBtn.classList.remove('liked');
+                }
+            }
+        } else {
+            alert('Failed to toggle like.');
+        }
+    }
+
+    async function toggleCommentsSection(postId) {
+        const commentsSection = document.getElementById(`commentsSection-${postId}`);
+        if (commentsSection.style.display === 'none') {
+            commentsSection.style.display = 'block';
+            await loadComments(postId);
+        } else {
+            commentsSection.style.display = 'none';
+        }
+    }
+
+    async function loadComments(postId) {
+        const commentsListDiv = document.getElementById(`commentsList-${postId}`);
+        commentsListDiv.innerHTML = 'Loading comments...';
+        const res = await fetch(`/post/${postId}/comments`);
+        if (res.ok) {
+            const comments = await res.json();
+            commentsListDiv.innerHTML = ''; // Clear loading message
+
+            if (comments.length === 0) {
+                commentsListDiv.innerHTML = '<p style="font-size:0.9em; color:#666; text-align:center;">No comments yet.</p>';
+            } else {
+                comments.forEach(comment => appendCommentToPost(commentsListDiv, comment));
+            }
+        } else {
+            commentsListDiv.innerHTML = '<p style="color:red;">Failed to load comments.</p>';
+        }
+    }
+
+    function appendCommentToPost(commentsListDiv, comment) {
+        const commentDiv = document.createElement('div');
+        commentDiv.className = 'comment-item';
+        commentDiv.innerHTML = `
+            <strong>${comment.username}</strong>
+            <span>${comment.text}</span>
+            <small>${new Date(comment.createdAt).toLocaleString()}</small>
+        `;
+        commentsListDiv.appendChild(commentDiv);
+    }
+
+    async function addComment(postId) {
+        if (!loggedInUserId) {
+            alert('Please log in to comment.');
+            return;
+        }
+        const commentInput = document.getElementById(`commentInput-${postId}`);
+        const text = commentInput.value.trim();
+        if (!text) return;
+
+        const res = await fetch(`/post/${postId}/comment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+
+        if (res.ok) {
+            commentInput.value = ''; // Clear input
+            await loadComments(postId); // Reload comments
+            const commentsCountSpan = document.getElementById(`comments-count-${postId}`);
+            if (commentsCountSpan) {
+                const currentCount = parseInt(commentsCountSpan.textContent.split(' ')[0]) || 0;
+                commentsCountSpan.textContent = `${currentCount + 1} Comments`;
+            }
+        } else {
+            alert('Failed to add comment.');
+        }
+    }
+
+    // --- Share Modal Functions ---
+    function showShareOptions(postId) {
+        const shareLink = `${window.location.origin}/post/${postId}`; // Example: A dedicated post page link
+        document.getElementById('shareLinkInput').value = shareLink;
+        document.getElementById('shareModal').style.display = 'flex'; // Show modal
+    }
+
+    function closeShareModal() {
+        document.getElementById('shareModal').style.display = 'none';
+    }
+
+    function copyShareLink() {
+        const shareLinkInput = document.getElementById('shareLinkInput');
+        shareLinkInput.select();
+        document.execCommand('copy');
+        alert('Link copied to clipboard!');
     }
 
     // --- Initial Load ---
