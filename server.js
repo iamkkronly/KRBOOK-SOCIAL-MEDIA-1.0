@@ -167,11 +167,25 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// New route for dedicated post page (for sharing functionality)
-// This is a minimal example. A full post page would typically render the post dynamically.
+// NEW ROUTE FOR SPECIFIC POST SHARING
+// This route will serve your main HTML file but expects the frontend to handle the postId
 app.get('/post/:postId', (req, res) => {
-  // For now, redirect to main page or a generic view, as the app is single-page
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html')); // Or a dedicated `single-post.html` if you prefer
+});
+
+// API endpoint to fetch a single post
+app.get('/api/post/:postId', async (req, res) => {
+  const { postId } = req.params;
+  let post = null;
+  for (let i = 0; i < DB_URIS.length; i++) {
+    post = await models[i].Post.findById(postId);
+    if (post) break;
+  }
+  if (post) {
+    res.json(post);
+  } else {
+    res.status(404).json({ message: 'Post not found' });
+  }
 });
 
 
