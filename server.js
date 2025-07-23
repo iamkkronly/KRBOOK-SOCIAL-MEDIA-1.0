@@ -19,7 +19,8 @@ const DB_URIS = [
   'mongodb+srv://nehep52163:9DyClobiZHWcrUkZ@cluster0.vmtxrn6.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
   'mongodb+srv://fofis98511:lnZ4jkqN7edg3TPz@cluster0.52fvmow.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
   'mongodb+srv://hoxow91206:0M3sqwNuPqvXzHVE@cluster0.87yfxeq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
-  'mongodb+srv://pavel92297:X5ZBEtkDp6njO0bc@cluster0.qvjst5u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+  'mongodb+srv://pavel92297:X5ZBEtkDp6njO0bc@cluster0.qvjst5u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0',
+'mongodb+srv://vifibi2050:6eqd3hHSYjEy8uMU@cluster0.pazikdq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
 ];
 
 let currentDB = 0;
