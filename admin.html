@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KRBOOK</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f2f5; display: flex; flex-direction: column; min-height: 100vh; }
+    header { background: #4267b2; color: white; padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
+    header h2 { margin: 0; }
+    .header-user-info { display: flex; align-items: center; }
+    .header-profile-pic { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; margin-right: 10px; border: 1px solid white; }
+    .logout-btn { background: #f44336; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; }
+    main { padding: 1rem; display: flex; flex-grow: 1; }
+    .sidebar { width: 250px; background: white; padding: 1rem; border-radius: 8px; margin-right: 1rem; flex-shrink: 0; }
+    .content-area { flex-grow: 1; display: flex; flex-direction: column; }
+    .container { max-width: 600px; margin: auto; }
+    .post, .chat-item, .friend-request-item, .friend-item, .user-search-result { background: white; margin-bottom: 1rem; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
+    .post img, .post video { max-width: 100%; height: auto; margin-top: 10px; border-radius: 4px; }
+    .actions { float: right; cursor: pointer; font-weight: bold; padding: 0 5px; }
+    .auth, #appContent { display: none; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
+    .auth { padding: 2rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    textarea { width: 100%; height: 60px; margin-top: 5px; border: 1px solid #ddd; border-radius: 4px; padding: 8px; box-sizing: border-box; }
+    input[type="file"], input[type="text"], input[type="password"] { margin: 5px 0; width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+    button { padding: 8px 12px; margin-top: 10px; background: #4267b2; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background 0.3s ease; }
+    button:hover { background: #365899; }
+    .tab-buttons { display: flex; margin-bottom: 1rem; }
+    .tab-buttons button { flex-grow: 1; margin: 0 5px; background: #e9ebee; color: #333; }
+    .tab-buttons button.active { background: #4267b2; color: white; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Admin Panel Styles */
+    .admin-panel { background: #ff6b6b; color: white; padding: 10px; margin-bottom: 20px; border-radius: 8px; text-align: center; }
+    .admin-controls { display: flex; gap: 10px; margin-top: 10px; }
+    .admin-btn { background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+    .admin-btn.rename { background: #ffc107; color: #000; }
+    .admin-btn:hover { opacity: 0.8; }
+    .admin-actions { float: right; display: flex; gap: 5px; }
+    .rename-input { display: none; margin-top: 10px; }
+    .rename-input input { width: 100%; margin-bottom: 10px; }
+    .rename-input button { margin-right: 5px; }
+
+    /* Upload Progress Styles */
+    .upload-progress-container {
+      margin-top: 10px;
+      display: none;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+    }
+    .upload-progress-bar {
+      width: 100%;
+      height: 20px;
+      background-color: #e9ecef;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .upload-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4267b2, #365899);
+      width: 0%;
+      transition: width 0.3s ease;
+      border-radius: 10px;
+      position: relative;
+    }
+    .upload-progress-fill::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      background-image: linear-gradient(
+        -45deg,
+        rgba(255, 255, 255, .2) 25%,
+        transparent 25%,
+        transparent 50%,
+        rgba(255, 255, 255, .2) 50%,
+        rgba(255, 255, 255, .2) 75%,
+        transparent 75%,
+        transparent
+      );
+      background-size: 50px 50px;
+      animation: move 2s linear infinite;
+    }
+    @keyframes move {
+      0% { background-position: 0 0; }
+      100% { background-position: 50px 50px; }
+    }
+    .upload-progress-text {
+      text-align: center;
+      font-size: 14px;
+      color: #495057;
+      font-weight: 500;
+    }
+    .upload-status {
+      margin-top: 5px;
+      font-size: 12px;
+      color: #6c757d;
+    }
+
+    /* Chat specific styles */
+    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 120px); background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
+    .chat-messages { flex-grow: 1; overflow-y: auto; padding: 1rem; border-bottom: 1px solid #eee; display: flex; flex-direction: column; }
+    .message-input-area { padding: 1rem; display: flex; border-top: 1px solid #eee; flex-wrap: wrap; /* Allow wrapping for reply-quote */ }
+    .message-input-area #messageInput { flex-grow: 1; margin-right: 10px; }
+    .message { margin-bottom: 8px; padding: 8px 12px; border-radius: 18px; max-width: 70%; position: relative; }
+    .message.sent { background: #0084ff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+    .message.received { background: #e4e6eb; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; }
+    .message strong { font-size: 0.9em; display: block; margin-bottom: 4px; }
+    .message-time { font-size: 0.7em; opacity: 0.7; margin-top: 5px; text-align: right; }
+    .chat-header { padding: 10px 1rem; border-bottom: 1px solid #eee; background: #f0f2f5; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+
+    .friend-action-btn { background: #28a745; margin-left: 5px; }
+    .friend-action-btn.decline { background: #dc3545; }
+    .friend-action-btn.remove { background: #ffc107; }
+
+    /* Reply specific styles */
+    .reply-quote {
+      background: rgba(0,0,0,0.05);
+      border-left: 3px solid #666;
+      padding: 5px 8px;
+      margin-bottom: 5px;
+      font-size: 0.85em;
+      color: #555;
+      border-radius: 3px;
+      width: 100%; /* Take full width */
+      box-sizing: border-box;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .reply-quote button {
+        margin: 0;
+        padding: 2px 5px;
+        font-size: 0.8em;
+        background: none;
+        color: #dc3545;
+        border: 1px solid #dc3545;
+    }
+    .message .reply-btn {
+      font-size: 0.75em;
+      color: #007bff;
+      cursor: pointer;
+      margin-top: 5px;
+      display: inline-block;
+      margin-left: 10px;
+    }
+    .message .reply-btn:hover {
+      text-decoration: underline;
+    }
+
+    /* Profile Section Specific Styles */
+    #profileTab {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    #profileDetails {
+        text-align: center;
+        margin-bottom: 1.5rem;
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        width: 100%;
+        max-width: 400px;
+        box-sizing: border-box;
+    }
+    #profilePictureDisplay {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        object-fit: cover;
+        margin-bottom: 1rem;
+        border: 2px solid #ddd;
+    }
+    #profileUsernameDisplay {
+        font-size: 1.8em;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+    }
+    #profilePosts {
+        width: 100%;
+        margin-top: 1rem;
+    }
+    .profile-edit-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 1rem;
+    }
+    .profile-edit-controls input[type="file"],
+    .profile-edit-controls input[type="text"] {
+        margin: 0; /* Override general input margin */
+    }
+    .clickable-username {
+        cursor: pointer;
+        font-weight: bold;
+        color: #4267b2;
+    }
+    .clickable-username:hover {
+        text-decoration: underline;
+    }
+
+    /* Profile Picture Upload Progress */
+    .profile-upload-progress-container {
+      margin-top: 10px;
+      display: none;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+    }
+    .profile-upload-progress-bar {
+      width: 100%;
+      height: 15px;
+      background-color: #e9ecef;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 5px;
+    }
+    .profile-upload-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #28a745, #20c997);
+      width: 0%;
+      transition: width 0.3s ease;
+      border-radius: 8px;
+    }
+    .profile-upload-progress-text {
+      text-align: center;
+      font-size: 12px;
+      color: #495057;
+      font-weight: 500;
+    }
+
+    /* Post Actions (Like, Comment, Share) */
+    .post-actions {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+    .post-actions button {
+      flex-basis: 30%;
+      margin: 0 5px;
+      background: #f0f2f5;
+      color: #606770;
+      border: none;
+      padding: 8px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .post-actions button:hover {
+      background: #e4e6eb;
+    }
+    .post-actions button.liked {
+      color: #4267b2;
+    }
+    .post-stats {
+      margin-top: 5px;
+      font-size: 0.9em;
+      color: #606770;
+      padding: 0 10px;
+    }
+    .comment-section {
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+    .comment-input-area {
+      display: flex;
+      margin-top: 10px;
+    }
+    .comment-input-area input {
+      flex-grow: 1;
+      margin-right: 10px;
+      margin-top: 0; /* Override general input margin */
+    }
+    .comment-item {
+      background: #f0f2f5;
+      padding: 8px 12px;
+      border-radius: 18px;
+      margin-bottom: 5px;
+    }
+    .comment-item strong {
+      font-size: 0.9em;
+      display: block;
+      margin-bottom: 2px;
+      color: #333;
+    }
+    .comment-item small {
+      font-size: 0.7em;
+      color: #606770;
+    }
+
+    /* Share Modal */
+    .modal-overlay {
+      display: none; /* Hidden by default */
+      position: fixed; /* Stay in place */
+      z-index: 1000; /* Sit on top */
+      left: 0;
+      top: 0;
+      width: 100%; /* Full width */
+      height: 100%; /* Full height */
+      overflow: auto; /* Enable scroll if needed */
+      background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 400px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      text-align: center;
+    }
+    .modal-content button {
+      margin-left: 10px;
+      margin-top: 0; /* Adjust button margin */
+    }
+    .modal-content input {
+      margin: 10px 0;
+    }
+
+    /* Single Post View Specific Styles */
+    #singlePostView {
+        display: none; /* Hidden by default */
+        max-width: 600px;
+        margin: 2rem auto;
+        padding: 1rem;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>KRBOOK</h2>
+    <div class="header-user-info">
+      <img id="headerProfilePic" class="header-profile-pic" src="/images/default-profile.png" alt="Profile Picture" />
+      <span id="loggedInUsername"></span>
+      <button id="logoutBtn" class="logout-btn" style="display: none;" onclick="logout()">Logout</button>
+    </div>
+  </header>
+  <main>
+    <section id="auth" class="auth">
+      <h3>Login or Create Account</h3>
+      <input id="username" placeholder="Username" />
+      <input id="password" type="password" placeholder="Password" />
+      <button onclick="login()">Login / Register</button>
+    </section>
+
+    <div id="appContent" style="display: none; width: 100%;">
+      <!-- Admin Panel -->
+      <div id="adminPanel" class="admin-panel" style="display: none;">
+        <h3>🔧 Admin Panel Active</h3>
+        <p>You have admin privileges. You can delete and rename any posts.</p>
+      </div>
+
+      <div class="sidebar">
+        <h3>Menu</h3>
+        <div class="tab-buttons">
+          <button id="postsTabBtn" class="active" onclick="showTab('postsTab', 'postsTabBtn')">Posts</button>
+          <button id="profileTabBtn" onclick="showMyProfile()">My Profile</button>
+          <button id="friendsTabBtn" onclick="showTab('friendsTab', 'friendsTabBtn')">Friends</button>
+          <button id="chatTabBtn" onclick="showTab('chatTab', 'chatTabBtn')">Chat</button>
+        </div>
+
+        <div id="friendsSidebarContent">
+          <h4>Friend Requests</h4>
+          <div id="friendRequestsList"></div>
+          <h4>Your Friends</h4>
+          <div id="friendsList"></div>
+        </div>
+
+        <div id="chatSidebarContent" style="display:none;">
+          <h4>Conversations</h4>
+          <div id="conversationsList"></div>
+        </div>
+      </div>
+
+      <div class="content-area">
+        <section id="postsTab" class="tab-content active container">
+          <h3>Create Post</h3>
+          <form id="postForm">
+            <textarea name="text" placeholder="What's on your mind?" required></textarea>
+            <input type="file" name="media" accept="image/*,video/*" />
+            <button type="submit" id="postSubmitBtn">Post</button>
+
+            <div id="uploadProgressContainer" class="upload-progress-container">
+              <div class="upload-progress-bar">
+                <div id="uploadProgressFill" class="upload-progress-fill"></div>
+              </div>
+              <div id="uploadProgressText" class="upload-progress-text">Uploading... 0%</div>
+              <div id="uploadStatus" class="upload-status">Preparing upload...</div>
+            </div>
+          </form>
+          <hr />
+          <div id="posts"></div>
+          <button id="loadMoreBtn" onclick="loadMore()">Load More</button>
+        </section>
+
+        <section id="profileTab" class="tab-content container">
+            <button id="backToMyProfileBtn" style="display:none; margin-bottom: 1rem;" onclick="showMyProfile()">Back to My Profile</button>
+            <div id="profileDetails">
+                <img id="profilePictureDisplay" src="/images/default-profile.png" alt="Profile Picture" />
+                <div id="profileUsernameDisplay">Loading...</div>
+
+                <div id="myProfileEditControls" class="profile-edit-controls" style="display:none;">
+                    <input type="file" id="profilePicInput" accept="image/*" />
+                    <input type="text" id="newUsernameInput" placeholder="New Username" />
+                    <button onclick="updateProfile()" id="profileUpdateBtn">Update Profile</button>
+
+                    <div id="profileUploadProgressContainer" class="profile-upload-progress-container">
+                      <div class="profile-upload-progress-bar">
+                        <div id="profileUploadProgressFill" class="profile-upload-progress-fill"></div>
+                      </div>
+                      <div id="profileUploadProgressText" class="profile-upload-progress-text">Uploading... 0%</div>
+                    </div>
+                </div>
+            </div>
+            <hr />
+            <h3>Posts by <span id="profilePostsUsername"></span></h3>
+            <div id="profilePosts"></div>
+        </section>
+
+        <section id="friendsTab" class="tab-content container">
+          <h3>Find Friends</h3>
+          <input type="text" id="userSearchInput" placeholder="Search for users..." onkeyup="searchUsers()">
+          <div id="userSearchResults"></div>
+        </section>
+
+        <section id="chatTab" class="tab-content container" style="height: 100%;">
+          <h3>Private Chat</h3>
+          <div id="activeChatWindow" class="chat-container" style="display: none;">
+            <div class="chat-header">
+              <span id="chatWithUsername"></span>
+              <button onclick="closeChat()">Close Chat</button>
+            </div>
+            <div id="chatMessages" class="chat-messages">
+              </div>
+            <div class="message-input-area">
+              <div id="replyingToMessage" class="reply-quote" style="display: none;">
+                Replying to: <span id="replyingToText"></span> <button onclick="cancelReply()">x</button>
+              </div>
+              <input type="text" id="messageInput" placeholder="Type a message..." />
+              <button onclick="sendMessage()">Send</button>
+            </div>
+          </div>
+          <div id="noChatSelected" style="text-align: center; padding: 20px; display: block;">
+            Select a conversation or start a new one to chat.
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <section id="singlePostView" class="container">
+      <button onclick="window.location.href='/'" style="margin-bottom: 1rem;">Back to Feed</button>
+      <div id="singlePostContainer">
+        </div>
+    </section>
+  </main>
+
+  <div id="shareModal" class="modal-overlay">
+    <div class="modal-content">
+      <h3>Share Post</h3>
+      <p>Copy the link below to share this post:</p>
+      <input type="text" id="shareLinkInput" value="" readonly />
+      <button onclick="copyShareLink()">Copy Link</button>
+      <button onclick="closeShareModal()">Close</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let skip = 0; // For main feed posts
+    let loggedInUser = null;
+    let loggedInUserId = null;
+    let loggedInProfilePicture = '/images/default-profile.png';
+    let socket = null;
+    let currentConversationId = null;
+    let currentChatParticipantName = null;
+    let conversationMessagesLoaded = new Set(); // To prevent duplicate message loading
+
+    let replyingTo = null; // Stores message data being replied to: { _id, senderUsername, text }
+    let currentProfileUser = null; // Stores the user object whose profile is currently being viewed
+
+    // Upload Progress tracking variables
+    let currentUploadXHR = null;
+    let currentProfileUploadXHR = null;
+
+    // Admin functionality
+    let isAdmin = false;
+
+    // Check if admin mode is enabled via URL parameter
+    function checkAdminMode() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const password = urlParams.get('password');
+      if (password === 'kaustav2007') {
+        isAdmin = true;
+        document.getElementById('adminPanel').style.display = 'block';
+      }
+    }
+
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const result = await res.json();
+      if (result.success) {
+        loggedInUser = result.username;
+        loggedInUserId = result.userId;
+        loggedInProfilePicture = result.profilePicture || '/images/default-profile.png'; // Use default if not set
+
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('appContent').style.display = 'flex';
+        updateHeaderUserInfo();
+        document.getElementById('logoutBtn').style.display = 'block';
+        initializeSocketIo();
+        loadPosts();
+        loadFriendRequests();
+        loadFriendsList();
+        loadConversations();
+        showTab('postsTab', 'postsTabBtn'); // Default tab
+      } else {
+        alert(result.message);
+      }
+    }
+
+    async function logout() {
+      const res = await fetch('/logout', { method: 'POST' });
+      const result = await res.json();
+      if (result.success) {
+        loggedInUser = null;
+        loggedInUserId = null;
+        loggedInProfilePicture = '/images/default-profile.png';
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+        }
+        document.getElementById('auth').style.display = 'flex';
+        document.getElementById('appContent').style.display = 'none';
+        updateHeaderUserInfo();
+        document.getElementById('logoutBtn').style.display = 'none';
+        // Clear all dynamic content
+        document.getElementById('posts').innerHTML = '';
+        document.getElementById('friendRequestsList').innerHTML = '';
+        document.getElementById('friendsList').innerHTML = '';
+        document.getElementById('userSearchResults').innerHTML = '';
+        document.getElementById('conversationsList').innerHTML = '';
+        document.getElementById('profilePosts').innerHTML = ''; // Clear profile posts
+        currentProfileUser = null;
+        closeChat(); // Close any active chat
+
+        // Hide single post view if it was active
+        document.getElementById('singlePostView').style.display = 'none';
+      } else {
+        alert('Failed to log out.');
+      }
+    }
+
+    async function fetchSession() {
+      const res = await fetch('/session');
+      const data = await res.json();
+      if (data.username && data.userId) {
+        loggedInUser = data.username;
+        loggedInUserId = data.userId;
+        loggedInProfilePicture = data.profilePicture || '/images/default-profile.png';
+
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('appContent').style.display = 'flex';
+        updateHeaderUserInfo();
+        document.getElementById('logoutBtn').style.display = 'block';
+        initializeSocketIo();
+        loadPosts();
+        loadFriendRequests();
+        loadFriendsList();
+        loadConversations();
+        showTab('postsTab', 'postsTabBtn'); // Default tab
+      } else {
+        document.getElementById('auth').style.display = 'flex';
+        document.getElementById('appContent').style.display = 'none';
+      }
+    }
+
+    function updateHeaderUserInfo() {
+        document.getElementById('loggedInUsername').textContent = `Logged in as: ${loggedInUser}`;
+        document.getElementById('headerProfilePic').src = loggedInProfilePicture;
+    }
+
+    // --- Socket.IO Initialization ---
+    function initializeSocketIo() {
+      if (!socket && loggedInUserId) {
+        socket = io(); // Connect to the Socket.IO server
+        socket.on('connect', () => {
+          console.log('Connected to Socket.IO server');
+          socket.emit('registerUser', loggedInUserId); // Register user with their ID
+        });
+
+        socket.on('disconnect', () => {
+          console.log('Disconnected from Socket.IO server');
+        });
+
+        socket.on('receiveMessage', (message) => {
+          console.log('Message received:', message);
+          if (message.conversation === currentConversationId) {
+            appendMessageToChat(message);
+          }
+          // Also update conversation list with new message/timestamp
+          loadConversations();
+        });
+
+        socket.on('conversationStarted', (data) => {
+          console.log('Conversation started event received:', data);
+          // When a new conversation is started via socket, update the conversations list
+          loadConversations();
+          // Optionally, auto-open the chat if this was a new conversation initiated by this user
+          // openChat(data.conversationId, data.participantNames, data.participants);
+        });
+
+        socket.on('chatError', (errorMsg) => {
+          alert(`Chat error: ${errorMsg}`);
+        });
+
+        // New Socket.IO events for posts
+        socket.on('postLiked', (data) => {
+          const likesSpan = document.getElementById(`likes-${data.postId}`);
+          if (likesSpan) {
+            likesSpan.textContent = `${data.newLikesCount} Likes`;
+          }
+        });
+
+        socket.on('newComment', (comment) => {
+          const commentsList = document.getElementById(`commentsList-${comment.postId}`);
+          // If comments section for this post is open or it's a single post view, append the comment
+          if (commentsList && (commentsList.style.display !== 'none' || document.getElementById('singlePostView').style.display === 'block')) {
+            appendCommentToPost(commentsList, comment);
+          }
+          const commentsCountSpan = document.getElementById(`comments-count-${comment.postId}`);
+          if (commentsCountSpan) {
+              commentsCountSpan.textContent = `${comment.postCommentsCount} Comments`;
+          }
+        });
+      }
+    }
+
+    // --- Upload Progress Functions ---
+    function showUploadProgress() {
+      document.getElementById('uploadProgressContainer').style.display = 'block';
+      document.getElementById('postSubmitBtn').disabled = true;
+      document.getElementById('postSubmitBtn').textContent = 'Uploading...';
+    }
+
+    function hideUploadProgress() {
+      document.getElementById('uploadProgressContainer').style.display = 'none';
+      document.getElementById('postSubmitBtn').disabled = false;
+      document.getElementById('postSubmitBtn').textContent = 'Post';
+      document.getElementById('uploadProgressFill').style.width = '0%';
+      document.getElementById('uploadProgressText').textContent = 'Uploading... 0%';
+      document.getElementById('uploadStatus').textContent = 'Preparing upload...';
+    }
+
+    function updateUploadProgress(percentage, status = '') {
+      document.getElementById('uploadProgressFill').style.width = percentage + '%';
+      document.getElementById('uploadProgressText').textContent = `Uploading... ${Math.round(percentage)}%`;
+      if (status) {
+        document.getElementById('uploadStatus').textContent = status;
+      }
+    }
+
+    function showProfileUploadProgress() {
+      document.getElementById('profileUploadProgressContainer').style.display = 'block';
+      document.getElementById('profileUpdateBtn').disabled = true;
+      document.getElementById('profileUpdateBtn').textContent = 'Uploading...';
+    }
+
+    function hideProfileUploadProgress() {
+      document.getElementById('profileUploadProgressContainer').style.display = 'none';
+      document.getElementById('profileUpdateBtn').disabled = false;
+      document.getElementById('profileUpdateBtn').textContent = 'Update Profile';
+      document.getElementById('profileUploadProgressFill').style.width = '0%';
+      document.getElementById('profileUploadProgressText').textContent = 'Uploading... 0%';
+    }
+
+    function updateProfileUploadProgress(percentage) {
+      document.getElementById('profileUploadProgressFill').style.width = percentage + '%';
+      document.getElementById('profileUploadProgressText').textContent = `Uploading... ${Math.round(percentage)}%`;
+    }
+
+    // --- Post Management with Progress ---
+    document.getElementById('postForm').onsubmit = async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+      const fileInput = e.target.querySelector('input[type="file"]');
+      const hasFile = fileInput.files.length > 0;
+
+      if (hasFile) {
+        showUploadProgress();
+        updateUploadProgress(0, 'Preparing file...');
+      }
+
+      // Create XMLHttpRequest for progress tracking
+      currentUploadXHR = new XMLHttpRequest();
+
+      currentUploadXHR.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable && hasFile) {
+          const percentage = (event.loaded / event.total) * 100;
+          updateUploadProgress(percentage, `Uploading ${fileInput.files[0].name}...`);
+        }
+      });
+
+      currentUploadXHR.addEventListener('load', () => {
+        if (currentUploadXHR.status === 200) {
+          if (hasFile) {
+            updateUploadProgress(100, 'Upload complete!');
+            setTimeout(() => {
+              hideUploadProgress();
+            }, 1000);
+          }
+          e.target.reset();
+          skip = 0; // Reset skip for main feed
+          document.getElementById('posts').innerHTML = '';
+          loadPosts();
+          // If currently viewing my own profile, refresh its posts
+          if (currentProfileUser && currentProfileUser.username === loggedInUser) {
+              openProfile(loggedInUser);
+          }
+        } else {
+          hideUploadProgress();
+          alert('Failed to create post. Are you logged in?');
+        }
+      });
+
+      currentUploadXHR.addEventListener('error', () => {
+        hideUploadProgress();
+        alert('Upload failed. Please try again.');
+      });
+
+      currentUploadXHR.addEventListener('abort', () => {
+        hideUploadProgress();
+        alert('Upload cancelled.');
+      });
+
+      currentUploadXHR.open('POST', '/post');
+      currentUploadXHR.send(formData);
+    };
+
+    async function loadPosts() {
+      const res = await fetch(`/posts?skip=${skip}`);
+      const posts = await res.json();
+      const postsDiv = document.getElementById('posts');
+
+      // Clear posts if it's the first load
+      if (skip === 0) {
+        postsDiv.innerHTML = '';
+      }
+
+      for (const post of posts) {
+        await addPostToFeed(post, postsDiv);
+      }
+      skip += posts.length; // Adjust skip by the actual number of posts loaded
+    }
+
+    async function addPostToFeed(post, containerDiv) {
+        const el = document.createElement('div');
+        el.className = 'post';
+
+        // Check if the current user has liked this post
+        let isLiked = false;
+        if (loggedInUserId) {
+            const likeRes = await fetch(`/post/${post._id}/isLiked`);
+            const likeData = await likeRes.json();
+            isLiked = likeData.isLiked;
+        }
+
+        // Admin controls for all posts if admin mode is enabled
+        let adminControls = '';
+        if (isAdmin) {
+          adminControls = `
+            <div class="admin-actions">
+              <button class="admin-btn" onclick="adminDeletePost('${post._id}')">Delete</button>
+              <button class="admin-btn rename" onclick="showRenameInput('${post._id}')">Rename</button>
+            </div>
+            <div id="renameInput-${post._id}" class="rename-input">
+              <input type="text" id="newText-${post._id}" value="${post.text.replace(/"/g, '&quot;')}" placeholder="New post text">
+              <button onclick="adminRenamePost('${post._id}')">Save</button>
+              <button onclick="hideRenameInput('${post._id}')">Cancel</button>
+            </div>
+          `;
+        }
+
+        el.innerHTML = `
+          <div>
+            <b class="clickable-username" onclick="openProfile('${post.username}')">${post.username}</b>
+            ${post.username === loggedInUser ? `<span class="actions" onclick="deletePost('${post._id}')">⋮</span>` : ''}
+            ${adminControls}
+          </div>
+          <div id="postText-${post._id}">${post.text}</div>
+          ${post.media ? (post.media.endsWith('.mp4') ? `<video controls src="${post.media}"></video>` : `<img src="${post.media}" />`) : ''}
+          <div class="post-stats">
+              <span id="likes-${post._id}">${post.likesCount || 0} Likes</span>
+              <span id="comments-count-${post._id}">${post.commentsCount || 0} Comments</span>
+          </div>
+          <div class="post-actions">
+            <button onclick="toggleLike('${post._id}')" class="${isLiked ? 'liked' : ''}" id="like-btn-${post._id}">Like</button>
+            <button onclick="toggleCommentsSection('${post._id}')">Comment</button>
+            <button onclick="showShareOptions('${post._id}')">Share</button>
+          </div>
+          <div id="commentsSection-${post._id}" class="comment-section" style="display:none;">
+            <div id="commentsList-${post._id}"></div>
+            <div class="comment-input-area">
+                <input type="text" id="commentInput-${post._id}" placeholder="Write a comment..." />
+                <button onclick="addComment('${post._id}')">Post</button>
+            </div>
+          </div>
+        `;
+        containerDiv.appendChild(el);
+    }
+
+    // Admin functions for deleting and renaming posts
+    async function adminDeletePost(postId) {
+      if (!isAdmin) {
+        alert('Admin access required');
+        return;
+      }
+      
+      if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+        return;
+      }
+
+      try {
+        const res = await fetch(`/post/${postId}`, { method: 'DELETE' });
+        if (res.ok) {
+          // Refresh the posts
+          skip = 0;
+          document.getElementById('posts').innerHTML = '';
+          loadPosts();
+          alert('Post deleted successfully');
+        } else {
+          alert('Failed to delete post');
+        }
+      } catch (error) {
+        alert('Error deleting post: ' + error.message);
+      }
+    }
+
+    function showRenameInput(postId) {
+      if (!isAdmin) {
+        alert('Admin access required');
+        return;
+      }
+      
+      document.getElementById(`renameInput-${postId}`).style.display = 'block';
+    }
+
+    function hideRenameInput(postId) {
+      document.getElementById(`renameInput-${postId}`).style.display = 'none';
+    }
+
+    async function adminRenamePost(postId) {
+      if (!isAdmin) {
+        alert('Admin access required');
+        return;
+      }
+
+      const newText = document.getElementById(`newText-${postId}`).value.trim();
+      if (!newText) {
+        alert('Post text cannot be empty');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/post/${postId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: newText })
+        });
+
+        if (res.ok) {
+          // Update the post text in the UI
+          document.getElementById(`postText-${postId}`).textContent = newText;
+          hideRenameInput(postId);
+          alert('Post updated successfully');
+        } else {
+          alert('Failed to update post');
+        }
+      } catch (error) {
+        alert('Error updating post: ' + error.message);
+      }
+    }
+
+    function loadMore() {
+      loadPosts();
+    }
+
+    async function deletePost(id) {
+      if (!confirm('Delete this post?')) return;
+      const res = await fetch(`/post/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        skip = 0; // Reset skip for main feed
+        document.getElementById('posts').innerHTML = '';
+        loadPosts();
+        if (currentProfileUser && currentProfileUser.username === loggedInUser) {
+            openProfile(loggedInUser); // Reload my profile posts if currently viewing it
+        }
+      } else {
+        alert('Failed to delete post.');
+      }
+    }
+
+    // --- Tab Management ---
+    function showTab(tabId, buttonId) {
+      document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+      document.querySelectorAll('.tab-buttons button').forEach(btn => btn.classList.remove('active'));
+
+      document.getElementById(tabId).classList.add('active');
+      document.getElementById(buttonId).classList.add('active');
+
+      // Adjust sidebar content visibility based on active tab
+      if (tabId === 'chatTab') {
+        document.getElementById('friendsSidebarContent').style.display = 'none';
+        document.getElementById('chatSidebarContent').style.display = 'block';
+      } else {
+        document.getElementById('friendsSidebarContent').style.display = 'block';
+        document.getElementById('chatSidebarContent').style.display = 'none';
+      }
+    }
+
+    // Initialize admin mode check when page loads
+    window.onload = function() {
+      checkAdminMode();
+      fetchSession();
+    };
+
+    // Rest of the JavaScript functions would continue here...
+    // (I'm truncating for brevity, but all the remaining functions from the original file would be included)
+  </script>
+</body>
+</html>
+
+
+    // --- Friend System ---
+    let searchTimeout;
+    function searchUsers() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        const query = document.getElementById('userSearchInput').value;
+        const resultsDiv = document.getElementById('userSearchResults');
+        resultsDiv.innerHTML = '';
+        if (query.length < 2) return;
+
+        const res = await fetch(`/users/search?query=${encodeURIComponent(query)}`);
+        const users = await res.json();
+
+        if (users.length === 0) {
+          resultsDiv.innerHTML = '<p>No users found.</p>';
+          return;
+        }
+
+        users.forEach(user => {
+          const el = document.createElement('div');
+          el.className = 'user-search-result';
+          el.innerHTML = `
+            <span>${user.username}</span>
+            <button onclick="sendFriendRequest('${user.username}')">Add Friend</button>
+          `;
+          resultsDiv.appendChild(el);
+        });
+      }, 300); // Debounce search
+    }
+
+    async function sendFriendRequest(username) {
+      if (!loggedInUser) { alert('Please log in.'); return; }
+      const res = await fetch(`/friends/request/${username}`, { method: 'POST' });
+      const result = await res.json();
+      alert(result.message);
+      if (result.success) {
+        document.getElementById('userSearchResults').innerHTML = ''; // Clear search results
+        document.getElementById('userSearchInput').value = '';
+      }
+    }
+
+    async function loadFriendRequests() {
+      const res = await fetch('/friends/requests/received');
+      const requests = await res.json();
+      const listDiv = document.getElementById('friendRequestsList');
+      listDiv.innerHTML = '';
+
+      if (requests.length === 0) {
+        listDiv.innerHTML = '<p>No pending requests.</p>';
+        return;
+      }
+
+      requests.forEach(req => {
+        const el = document.createElement('div');
+        el.className = 'friend-request-item';
+        el.innerHTML = `
+          <span>${req.requester.username}</span>
+          <button class="friend-action-btn" onclick="acceptFriendRequest('${req.requester.username}')">Accept</button>
+          <button class="friend-action-btn decline" onclick="declineFriendRequest('${req.requester.username}')">Decline</button>
+        `;
+        listDiv.appendChild(el);
+      });
+    }
+
+    async function acceptFriendRequest(username) {
+      const res = await fetch(`/friends/accept/${username}`, { method: 'POST' });
+      const result = await res.json();
+      alert(result.message);
+      if (result.success) {
+        loadFriendRequests();
+        loadFriendsList();
+      }
+    }
+
+    async function declineFriendRequest(username) {
+      const res = await fetch(`/friends/decline/${username}`, { method: 'POST' });
+      const result = await res.json();
+      alert(result.message);
+      if (result.success) {
+        loadFriendRequests();
+      }
+    }
+
+    async function loadFriendsList() {
+      const res = await fetch('/friends/list');
+      const friends = await res.json();
+      const listDiv = document.getElementById('friendsList');
+      listDiv.innerHTML = '';
+
+      if (friends.length === 0) {
+        listDiv.innerHTML = '<p>No friends yet.</p>';
+        return;
+      }
+
+      friends.forEach(friend => {
+        const el = document.createElement('div');
+        el.className = 'friend-item';
+        el.innerHTML = `
+          <span>${friend.username}</span>
+          <button onclick="startChatWithFriend('${friend._id}', '${friend.username}')">Message</button>
+        `;
+        listDiv.appendChild(el);
+      });
+    }
+
+    // --- Chat System ---
+    async function loadConversations() {
+      const res = await fetch('/conversations');
+      const conversations = await res.json();
+      const listDiv = document.getElementById('conversationsList');
+      listDiv.innerHTML = '';
+
+      if (conversations.length === 0) {
+        listDiv.innerHTML = '<p>No conversations.</p>';
+        return;
+      }
+
+      conversations.forEach(conv => {
+        const el = document.createElement('div');
+        el.className = 'chat-item';
+        el.innerHTML = `
+          <div><strong>${conv.participantNames}</strong></div>
+          <small>${conv.lastMessage}</small>
+          <button onclick="openChat('${conv._id}', '${conv.participantNames}', '${conv.participants.map(p => p._id).join(',')}')">Open Chat</button>
+        `;
+        listDiv.appendChild(el);
+      });
+    }
+
+    async function startChatWithFriend(friendId, friendUsername) {
+      if (!socket || !loggedInUserId) {
+        alert('Chat system not ready. Please log in first.');
+        return;
+      }
+      console.log(`Attempting to start conversation with ${friendUsername} (${friendId})`);
+      socket.emit('startConversation', { recipientId: friendId, senderId: loggedInUserId });
+
+      // Listen for the 'conversationStarted' event
+      socket.once('conversationStarted', (data) => {
+        console.log('Conversation started, opening chat:', data);
+        openChat(data.conversationId, data.participantNames, data.participants.map(p => p._id).join(','));
+      });
+    }
+
+    async function openChat(conversationId, participantNames, participantIds) {
+      document.getElementById('noChatSelected').style.display = 'none';
+      document.getElementById('activeChatWindow').style.display = 'flex';
+      document.getElementById('chatWithUsername').textContent = `Chat with: ${participantNames}`;
+      document.getElementById('chatMessages').innerHTML = ''; // Clear previous messages
+      conversationMessagesLoaded.clear(); // Reset loaded messages
+      cancelReply(); // Clear any pending reply
+
+      currentConversationId = conversationId;
+      currentChatParticipantName = participantNames;
+
+      // Load messages for this conversation
+      const res = await fetch(`/conversations/${conversationId}/messages`);
+      const messages = await res.json();
+      messages.forEach(msg => appendMessageToChat(msg));
+
+      // Scroll to bottom
+      const chatMessagesDiv = document.getElementById('chatMessages');
+      chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+    }
+
+    function appendMessageToChat(message) {
+      // Use message._id as a unique key to prevent duplicates
+      if (conversationMessagesLoaded.has(message._id)) {
+        return;
+      }
+      conversationMessagesLoaded.add(message._id);
+
+      const chatMessagesDiv = document.getElementById('chatMessages');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message ' + (String(message.sender._id) === String(loggedInUserId) ? 'sent' : 'received');
+
+      messageDiv.innerHTML = `
+        <strong>${message.sender.username}</strong>
+        <span>${message.text}</span>
+        <div class="message-time">
+          ${new Date(message.createdAt).toLocaleTimeString()}
+          <span class="reply-btn" onclick="prepareReply('${message._id}', '${message.sender.username}', \`${message.text.replace(/`/g, '\\`')}\`)">Reply</span>
+        </div>
+      `;
+      chatMessagesDiv.appendChild(messageDiv);
+      chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight; // Auto-scroll to latest message
+    }
+
+    function prepareReply(messageId, senderUsername, messageText) {
+      replyingTo = {
+        _id: messageId,
+        senderUsername: senderUsername,
+        text: messageText
+      };
+      document.getElementById('replyingToText').textContent = `${senderUsername}: "${messageText.substring(0, 30)}${messageText.length > 30 ? '...' : ''}"`;
+      document.getElementById('replyingToMessage').style.display = 'flex'; // Use flex for reply-quote
+      document.getElementById('messageInput').focus();
+    }
+
+    function cancelReply() {
+      replyingTo = null;
+      document.getElementById('replyingToMessage').style.display = 'none';
+      document.getElementById('replyingToText').textContent = '';
+    }
+
+    function sendMessage() {
+      const messageInput = document.getElementById('messageInput');
+      let text = messageInput.value.trim();
+
+      if (text && currentConversationId && socket && loggedInUserId) {
+        if (replyingTo) {
+          // Prepend the reply quote to the message text
+          text = `[Replying to ${replyingTo.senderUsername}: "${replyingTo.text.substring(0, 50)}${replyingTo.text.length > 50 ? '...' : ''}"] ${text}`;
+          cancelReply(); // Clear the reply state
+        }
+
+        socket.emit('sendMessage', {
+          conversationId: currentConversationId,
+          senderId: loggedInUserId,
+          text: text
+        });
+        messageInput.value = '';
+      }
+    }
+
+    function closeChat() {
+      document.getElementById('activeChatWindow').style.display = 'none';
+      document.getElementById('noChatSelected').style.display = 'block';
+      currentConversationId = null;
+      currentChatParticipantName = null;
+      conversationMessagesLoaded.clear();
+      cancelReply(); // Clear any pending reply
+    }
+
+    // --- Profile Management ---
+    async function showMyProfile() {
+      if (!loggedInUser) {
+        alert('Please log in first.');
+        return;
+      }
+      openProfile(loggedInUser);
+    }
+
+    async function openProfile(username) {
+      try {
+        const res = await fetch(`/user/${username}`);
+        const userData = await res.json();
+
+        if (!userData.success) {
+          alert('User not found.');
+          return;
+        }
+
+        currentProfileUser = userData.user;
+
+        // Update profile display
+        document.getElementById('profilePictureDisplay').src = userData.user.profilePicture || '/images/default-profile.png';
+        document.getElementById('profileUsernameDisplay').textContent = userData.user.username;
+        document.getElementById('profilePostsUsername').textContent = userData.user.username;
+
+        // Show/hide edit controls based on whether this is the logged-in user's profile
+        const isMyProfile = userData.user.username === loggedInUser;
+        document.getElementById('myProfileEditControls').style.display = isMyProfile ? 'block' : 'none';
+        document.getElementById('backToMyProfileBtn').style.display = isMyProfile ? 'none' : 'block';
+
+        // Load user's posts
+        const postsRes = await fetch(`/user/${username}/posts`);
+        const userPosts = await postsRes.json();
+        const profilePostsDiv = document.getElementById('profilePosts');
+        profilePostsDiv.innerHTML = '';
+
+        if (userPosts.length === 0) {
+          profilePostsDiv.innerHTML = '<p>No posts yet.</p>';
+        } else {
+          for (const post of userPosts) {
+            await addPostToFeed(post, profilePostsDiv);
+          }
+        }
+
+        // Switch to profile tab
+        showTab('profileTab', 'profileTabBtn');
+      } catch (error) {
+        console.error('Error loading profile:', error);
+        alert('Failed to load profile.');
+      }
+    }
+
+    async function updateProfile() {
+      const profilePicInput = document.getElementById('profilePicInput');
+      const newUsernameInput = document.getElementById('newUsernameInput');
+      const hasFile = profilePicInput.files.length > 0;
+      const hasNewUsername = newUsernameInput.value.trim() !== '';
+
+      if (!hasFile && !hasNewUsername) {
+        alert('Please select a profile picture or enter a new username.');
+        return;
+      }
+
+      const formData = new FormData();
+      if (hasFile) {
+        formData.append('profilePicture', profilePicInput.files[0]);
+        showProfileUploadProgress();
+        updateProfileUploadProgress(0);
+      }
+      if (hasNewUsername) {
+        formData.append('username', newUsernameInput.value.trim());
+      }
+
+      // Create XMLHttpRequest for progress tracking
+      currentProfileUploadXHR = new XMLHttpRequest();
+
+      if (hasFile) {
+        currentProfileUploadXHR.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const percentage = (event.loaded / event.total) * 100;
+            updateProfileUploadProgress(percentage);
+          }
+        });
+      }
+
+      currentProfileUploadXHR.addEventListener('load', () => {
+        if (currentProfileUploadXHR.status === 200) {
+          const result = JSON.parse(currentProfileUploadXHR.responseText);
+          if (result.success) {
+            if (hasFile) {
+              updateProfileUploadProgress(100);
+              setTimeout(() => {
+                hideProfileUploadProgress();
+              }, 1000);
+            }
+            
+            // Update logged-in user info if username changed
+            if (hasNewUsername) {
+              loggedInUser = result.newUsername;
+            }
+            if (result.profilePicture) {
+              loggedInProfilePicture = result.profilePicture;
+            }
+            
+            updateHeaderUserInfo();
+            profilePicInput.value = '';
+            newUsernameInput.value = '';
+            
+            // Refresh the profile view
+            openProfile(loggedInUser);
+            alert('Profile updated successfully!');
+          } else {
+            hideProfileUploadProgress();
+            alert(result.message || 'Failed to update profile.');
+          }
+        } else {
+          hideProfileUploadProgress();
+          alert('Failed to update profile.');
+        }
+      });
+
+      currentProfileUploadXHR.addEventListener('error', () => {
+        hideProfileUploadProgress();
+        alert('Upload failed. Please try again.');
+      });
+
+      currentProfileUploadXHR.addEventListener('abort', () => {
+        hideProfileUploadProgress();
+        alert('Upload cancelled.');
+      });
+
+      currentProfileUploadXHR.open('PUT', '/profile');
+      currentProfileUploadXHR.send(formData);
+    }
+
+    // --- Post Interactions ---
+    async function toggleLike(postId) {
+      if (!loggedInUserId) {
+        alert('Please log in to like posts.');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/post/${postId}/like`, { method: 'POST' });
+        const result = await res.json();
+        
+        if (result.success) {
+          const likeBtn = document.getElementById(`like-btn-${postId}`);
+          const likesSpan = document.getElementById(`likes-${postId}`);
+          
+          if (result.liked) {
+            likeBtn.classList.add('liked');
+          } else {
+            likeBtn.classList.remove('liked');
+          }
+          
+          likesSpan.textContent = `${result.likesCount} Likes`;
+        }
+      } catch (error) {
+        console.error('Error toggling like:', error);
+      }
+    }
+
+    async function toggleCommentsSection(postId) {
+      const commentsSection = document.getElementById(`commentsSection-${postId}`);
+      const commentsList = document.getElementById(`commentsList-${postId}`);
+      
+      if (commentsSection.style.display === 'none') {
+        commentsSection.style.display = 'block';
+        
+        // Load comments if not already loaded
+        if (commentsList.innerHTML === '') {
+          await loadComments(postId);
+        }
+      } else {
+        commentsSection.style.display = 'none';
+      }
+    }
+
+    async function loadComments(postId) {
+      try {
+        const res = await fetch(`/post/${postId}/comments`);
+        const comments = await res.json();
+        const commentsList = document.getElementById(`commentsList-${postId}`);
+        
+        commentsList.innerHTML = '';
+        comments.forEach(comment => {
+          appendCommentToPost(commentsList, comment);
+        });
+      } catch (error) {
+        console.error('Error loading comments:', error);
+      }
+    }
+
+    function appendCommentToPost(commentsList, comment) {
+      const commentDiv = document.createElement('div');
+      commentDiv.className = 'comment-item';
+      commentDiv.innerHTML = `
+        <strong>${comment.author.username}</strong>
+        ${comment.text}
+        <small>${new Date(comment.createdAt).toLocaleString()}</small>
+      `;
+      commentsList.appendChild(commentDiv);
+    }
+
+    async function addComment(postId) {
+      const commentInput = document.getElementById(`commentInput-${postId}`);
+      const text = commentInput.value.trim();
+      
+      if (!text) {
+        alert('Please enter a comment.');
+        return;
+      }
+
+      if (!loggedInUserId) {
+        alert('Please log in to comment.');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/post/${postId}/comment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        
+        const result = await res.json();
+        if (result.success) {
+          commentInput.value = '';
+          // The comment will be added via socket event
+        } else {
+          alert('Failed to add comment.');
+        }
+      } catch (error) {
+        console.error('Error adding comment:', error);
+        alert('Failed to add comment.');
+      }
+    }
+
+    function showShareOptions(postId) {
+      const shareLink = `${window.location.origin}/post/${postId}`;
+      document.getElementById('shareLinkInput').value = shareLink;
+      document.getElementById('shareModal').style.display = 'flex';
+    }
+
+    function copyShareLink() {
+      const shareLinkInput = document.getElementById('shareLinkInput');
+      shareLinkInput.select();
+      document.execCommand('copy');
+      alert('Link copied to clipboard!');
+    }
+
+    function closeShareModal() {
+      document.getElementById('shareModal').style.display = 'none';
+    }
+
+    // Allow Enter key to send messages
+    document.addEventListener('DOMContentLoaded', function() {
+      const messageInput = document.getElementById('messageInput');
+      if (messageInput) {
+        messageInput.addEventListener('keypress', function(e) {
+          if (e.key === 'Enter') {
+            sendMessage();
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>
